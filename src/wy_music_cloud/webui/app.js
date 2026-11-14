@@ -389,7 +389,7 @@
   }
 
   function syncNow(dryRun) {
-    api("/api/sync", { method: "POST", body: { dry_run: dryRun } }).then(function (data) {
+    api("/api/sync", { method: "POST", body: { dry_run: dryRun, force: el("forceRecheck").checked } }).then(function (data) {
       showToast(data.started ? "同步任务已启动" : "已有同步任务在运行");
       loadStatus(false);
     }).catch(function (error) {
@@ -446,6 +446,8 @@
     el("diagnosticsButton").addEventListener("click", function () { loadDiagnostics("diagnosticsView"); });
     el("loginDiagnosticsButton").addEventListener("click", function () { loadDiagnostics("loginDiagnosticsView"); });
     el("copyDiagnosticsButton").addEventListener("click", copyDiagnostics);
+    el("copyDiagnosticsDashboard").addEventListener("click", copyDiagnostics);
+    el("logCopyDiagnostics").addEventListener("click", copyDiagnostics);
     el("loginDiagnostics").addEventListener("toggle", function () {
       if (el("loginDiagnostics").open && el("loginDiagnosticsView").classList.contains("hidden")) {
         loadDiagnostics("loginDiagnosticsView");

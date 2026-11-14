@@ -76,16 +76,32 @@ def test_client_adds_pc_cookie_defaults() -> None:
     assert client.cookies["appver"] == "2.7.1.198277"
 
 
-def test_upload_remote_exists_skips_rest(tmp_path: Path) -> None:
+def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "whatever.mp3"
     path.write_bytes(b"x")
-    client = make_client()
+    client = make_client(rate_limit=0)
     client.check_upload = lambda *a, **k: {"need_upload": False, "song_id": 7}  # type: ignore[method-assign]
-    client.alloc_token = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
+    events: list[str] = []
+    captured: dict = {}
+
+    def alloc(md5, name, ext, *, bucket=""):
+        assert bucket == "", "needUpload=false 时不应再分配 NOS 对象"
+        events.append("alloc")
+        return {"resourceId": "resource-id"}
+
+    client.alloc_token = alloc  # type: ignore[method-assign]
+    client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not upload bytes"))  # type: ignore[method-assign]
+    client.finish_upload = lambda **k: (captured.update(k), 7)[1]  # type: ignore[method-assign]
+    client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
+    monkeypatch.setattr(client_module, "read_tags", lambda p: {"title": "晴天"})
+
     result = client.upload(path, md5="abc")
-    assert result.uploaded is False
-    assert result.reason == "remote_exists"
+    assert result.uploaded is True
+    assert result.reason == "uploaded"
     assert result.song_id == 7
+    assert captured["song_id"] == 7
+    assert captured["resource_id"] == "resource-id"
+    assert events == ["alloc", "pub:7"]
 
 
 def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:

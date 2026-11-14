@@ -85,6 +85,22 @@ def test_remote_exists_skipped(tmp_path: Path) -> None:
         assert record.song_id == 7
 
 
+def test_skipped_remote_record_is_rechecked(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    first = FakeClient({"a.mp3": UploadResult(False, song_id=7, reason="remote_exists")})
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, first, state).run_once().skipped_remote == 1
+        assert state.get(music / "a.mp3").status == "skipped_remote"
+
+        second = FakeClient()
+        stats = Syncer(config, second, state).run_once()
+        assert stats.uploaded == 1
+        assert len(second.calls) == 1
+
+
 def test_failure_is_isolated(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

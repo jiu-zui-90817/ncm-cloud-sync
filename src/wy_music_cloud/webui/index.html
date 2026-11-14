@@ -100,7 +100,12 @@
           <button id="syncButton" class="btn primary" type="button">立即同步</button>
           <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
           <button id="refreshButton" class="btn ghost" type="button">刷新状态</button>
+          <button id="copyDiagnosticsDashboard" class="btn ghost" type="button">复制诊断</button>
         </div>
+        <label class="check-field">
+          <input id="forceRecheck" type="checkbox">
+          <span>强制重新检查（忽略本地已同步记录，修云端已有但实际为空）</span>
+        </label>
         <div class="sync-meta">
           <div><span class="meta-label">上次运行</span><span id="lastRun">-</span></div>
           <div><span class="meta-label">下次计划</span><span id="nextRun">-</span></div>
@@ -158,6 +163,7 @@
           </div>
           <div class="log-actions">
             <button id="diagnosticsButton" class="btn ghost" type="button">诊断信息</button>
+            <button id="logCopyDiagnostics" class="btn ghost" type="button">复制诊断</button>
             <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
           </div>
         </div>

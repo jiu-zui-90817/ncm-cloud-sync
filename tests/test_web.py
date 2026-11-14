@@ -341,5 +341,8 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert status == "200 OK"
     assert "cookieInput" in html
     assert "diagnosticsButton" in html
+    assert "copyDiagnosticsDashboard" in html
+    assert "logCopyDiagnostics" in html
+    assert "forceRecheck" in html
     assert "loginDiagnosticsButton" in html
     assert "copyDiagnosticsButton" in html

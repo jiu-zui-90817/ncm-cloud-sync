@@ -157,7 +157,7 @@ class Syncer:
             and record is not None
             and record.size == audio.size
             and record.mtime_ns == audio.mtime_ns
-            and record.status in {"uploaded", "skipped_local", "skipped_remote"}
+            and record.status in {"uploaded", "skipped_local"}
         ):
             stats.up_to_date += 1
             return

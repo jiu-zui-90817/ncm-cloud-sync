@@ -553,20 +553,28 @@ class CloudClient:
         size = path.stat().st_size
         md5 = md5 or file_md5(path)
         check = self.check_upload(md5, size, ext)
-        if not check["need_upload"]:
-            return UploadResult(
-                False,
-                song_id=check["song_id"],
-                reason="remote_exists",
-            )
+        logger.info(
+            "云盘查重结果: md5=%s size=%s ext=%s needUpload=%s songId=%s",
+            md5,
+            size,
+            ext,
+            check["need_upload"],
+            check["song_id"],
+        )
+        logger.debug("云盘查重响应: %s", check.get("raw"))
         if dry_run:
             return UploadResult(False, reason="dry_run")
 
         tags = read_tags(path)
         name = sanitize_filename(tags.get("title") or path.stem)
         resource = self.alloc_token(md5, name, ext, bucket="")
-        nos_token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
-        self.upload_to_nos(nos_token, path, md5, ext)
+        if check["need_upload"]:
+            nos_token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
+            self.upload_to_nos(nos_token, path, md5, ext)
+        else:
+            # needUpload=false 只说明文件字节已在网易云对象存储，
+            # 云盘条目仍需 info/v2 + pub/v2 才会出现在云盘列表。
+            logger.info("文件内容已在网易云对象存储，补建云盘条目: %s", path)
         song_id = self.finish_upload(
             md5=md5,
             song_id=check["song_id"] or 0,
