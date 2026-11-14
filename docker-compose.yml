@@ -1,0 +1,19 @@
+services:
+  wy-music-cloud:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PUID: "${PUID:-1000}"
+        PGID: "${PGID:-1000}"
+    image: wy-music-cloud:latest
+    container_name: wy-music-cloud
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./data:/data
+      # 改成你的音乐目录；容器内只读，避免误删源文件
+      - /vol1/1000/Music:/music:ro
+    command: ["-c", "/config/config.yaml", "daemon"]

@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from wy_music_cloud.client import UploadResult
+from wy_music_cloud.config import Config
+from wy_music_cloud.errors import UploadError
+from wy_music_cloud.state import StateStore
+from wy_music_cloud.syncer import Syncer
+
+
+class FakeClient:
+    def __init__(self, outcomes=None) -> None:
+        self.outcomes = outcomes or {}
+        self.calls: list[tuple[str, bool]] = []
+
+    def upload(self, path, *, md5=None, dry_run=False):
+        self.calls.append((Path(path).name, dry_run))
+        if dry_run:
+            return UploadResult(False, reason="dry_run")
+        outcome = self.outcomes.get(Path(path).name)
+        if outcome is None:
+            return UploadResult(True, song_id=len(self.calls))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def make_config(tmp_path: Path, music: Path) -> Config:
+    return Config(
+        music_dirs=[music],
+        data_dir=tmp_path / "data",
+        extensions=("mp3",),
+        upload_extensions=("mp3",),
+        interval=1,
+        rate_limit=0,
+    )
+
+
+def test_upload_then_up_to_date(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        first = Syncer(config, client, state).run_once()
+        assert first.uploaded == 1
+        assert state.get(music / "a.mp3").status == "uploaded"
+
+        second = Syncer(config, client, state).run_once()
+        assert second.uploaded == 0
+        assert second.up_to_date == 1
+        assert len(client.calls) == 1
+
+
+def test_local_duplicate_skipped(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"same" * 100)
+    (music / "b.mp3").write_bytes(b"same" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.uploaded == 1
+        assert stats.skipped_local == 1
+        assert len(client.calls) == 1
+        assert state.get(music / "b.mp3").status == "skipped_local"
+
+
+def test_remote_exists_skipped(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    client = FakeClient({"a.mp3": UploadResult(False, song_id=7, reason="remote_exists")})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.skipped_remote == 1
+        record = state.get(music / "a.mp3")
+        assert record.status == "skipped_remote"
+        assert record.song_id == 7
+
+
+def test_failure_is_isolated(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    (music / "b.mp3").write_bytes(b"b")
+    config = make_config(tmp_path, music)
+    client = FakeClient({"a.mp3": UploadError("boom")})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.failed == 1
+        assert stats.uploaded == 1
+        assert state.get(music / "a.mp3").status == "failed"
+        assert state.get(music / "b.mp3").status == "uploaded"
+
+
+def test_dry_run_does_not_persist_uploaded(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state, dry_run=True).run_once()
+        assert stats.planned == 1
+        assert stats.uploaded == 0
+        assert state.get(music / "a.mp3") is None
+
+
+def test_missing_file_marked(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        Syncer(config, client, state).run_once()
+        target.unlink()
+        stats = Syncer(config, client, state).run_once()
+        assert stats.missing == 1
+        assert state.get(target).status == "missing"
+
+
+def test_limit(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    (music / "b.mp3").write_bytes(b"b")
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state, limit=1).run_once()
+        assert stats.scanned == 1
+        assert len(client.calls) == 1

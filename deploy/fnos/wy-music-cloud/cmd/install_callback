@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+. "$SCRIPT_DIR/common.sh"
+
+MUSIC_DIR="${wizard_music_dir:-/vol1/1000/Music}"
+INTERVAL="${wizard_interval:-3600}"
+TIMEZONE="${wizard_timezone:-Asia/Shanghai}"
+DRY_RUN="${wizard_dry_run:-false}"
+PUID_VALUE="${wizard_puid:-1000}"
+PGID_VALUE="${wizard_pgid:-1000}"
+VERSION="${TRIM_APPVER:-0.1.0}"
+
+write_env_file "$MUSIC_DIR" "$INTERVAL" "$TIMEZONE" "$DRY_RUN" "$PUID_VALUE" "$PGID_VALUE" "$VERSION"
+write_login_hint
+
+echo "wy-music-cloud 已写入配置: $ENV_FILE"

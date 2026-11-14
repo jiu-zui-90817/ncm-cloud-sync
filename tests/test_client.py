@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import httpx
+import pytest
+
+import wy_music_cloud.client as client_module
+from wy_music_cloud.client import CloudClient, NOS_BUCKET
+from wy_music_cloud.errors import ApiError, AuthError
+
+
+def make_client(**kwargs) -> CloudClient:
+    return CloudClient({"MUSIC_U": "token", "__csrf": "csrf"}, **kwargs)
+
+
+def test_check_upload_payload() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
+        return {"needUpload": True, "songId": 12}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    result = client.check_upload("abc", 123, "mp3")
+    assert result["need_upload"] is True
+    assert result["song_id"] == 12
+    path, payload, kwargs = calls[0]
+    assert path == "/api/cloud/upload/check"
+    assert kwargs["host"] == client_module.INTERFACE_URL
+    assert payload["length"] == "123"
+    assert payload["md5"] == "abc"
+
+
+def test_alloc_token_sanitizes_name() -> None:
+    client = make_client()
+    captured = {}
+
+    def fake_weapi(path, payload=None, **kwargs):
+        captured.update(payload)
+        return {"result": {"resourceId": "rid"}}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    token = client.alloc_token("abc", "a b.c", "mp3", bucket="")
+    assert token["resourceId"] == "rid"
+    assert captured["filename"] == "ab_c"
+    assert captured["bucket"] == ""
+
+
+def test_phone_login_hashes_password() -> None:
+    client = make_client()
+    captured: dict = {}
+
+    def fake_weapi(path, payload=None, **kwargs):
+        captured.update(payload)
+        return {"code": 200}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    client.phone_login("13800000000", "secret")
+    import hashlib
+
+    assert captured["password"] == hashlib.md5(b"secret").hexdigest()
+
+
+def test_client_adds_pc_cookie_defaults() -> None:
+    client = CloudClient({})
+    assert client.cookies["os"] == "pc"
+    assert client.cookies["appver"] == "2.7.1.198277"
+
+
+def test_upload_remote_exists_skips_rest(tmp_path: Path) -> None:
+    path = tmp_path / "whatever.mp3"
+    path.write_bytes(b"x")
+    client = make_client()
+    client.check_upload = lambda *a, **k: {"need_upload": False, "song_id": 7}  # type: ignore[method-assign]
+    client.alloc_token = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
+    result = client.upload(path, md5="abc")
+    assert result.uploaded is False
+    assert result.reason == "remote_exists"
+    assert result.song_id == 7
+
+
+def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "song.mp3"
+    path.write_bytes(b"audio-bytes")
+    client = make_client(rate_limit=0)
+    events: list[str] = []
+    client.check_upload = lambda *a, **k: (events.append("check"), {"need_upload": True, "song_id": 0})[1]  # type: ignore[method-assign]
+
+    def alloc(md5, name, ext, *, bucket=""):
+        events.append("alloc:" + (bucket or "resource"))
+        if bucket:
+            return {"objectKey": "obj/key", "token": "nos-token"}
+        return {"resourceId": "resource-id"}
+
+    client.alloc_token = alloc  # type: ignore[method-assign]
+    client.upload_to_nos = lambda *a, **k: events.append("nos")  # type: ignore[method-assign]
+    client.finish_upload = lambda **k: (events.append("info"), 99)[1]  # type: ignore[method-assign]
+    client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
+    monkeypatch.setattr(client_module, "read_tags", lambda p: {"title": "晴天"})
+
+    result = client.upload(path, md5="abc")
+    assert result.uploaded is True
+    assert result.song_id == 99
+    assert result.cloud_name == "晴天"
+    assert events == ["check", "alloc:resource", "alloc:" + NOS_BUCKET, "nos", "info", "pub:99"]
+
+
+def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:
+    path = tmp_path / "song.mp3"
+    path.write_bytes(b"x")
+    client = make_client()
+    client.check_upload = lambda *a, **k: {"need_upload": True, "song_id": 0}  # type: ignore[method-assign]
+    client.alloc_token = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
+    result = client.upload(path, md5="abc", dry_run=True)
+    assert result.uploaded is False
+    assert result.reason == "dry_run"
+
+
+def test_post_json_retries_5xx(monkeypatch) -> None:
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            return httpx.Response(500, json={"code": 500})
+        return httpx.Response(200, json={"code": 200, "ok": True})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=2)
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    body = client._weapi("/weapi/test", {})
+    assert attempts["n"] == 3
+    assert body["ok"] is True
+
+
+def test_auth_code_raises_auth_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 301, "msg": "需要登录"})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    with pytest.raises(AuthError):
+        client._weapi("/weapi/test", {})
+
+
+def test_api_error_code() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 400, "msg": "bad"})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    with pytest.raises(ApiError):
+        client._weapi("/weapi/test", {})
+
+
+def test_cloud_songs_pagination() -> None:
+    client = make_client()
+
+    def fake_weapi(path, payload=None, **kwargs):
+        if payload["offset"] == 0:
+            return {"code": 200, "count": 3, "data": [{"songId": 1}, {"songId": 2}]}
+        return {"code": 200, "count": 3, "data": [{"songId": 3}]}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    songs = client.cloud_songs(page_size=2)
+    assert [song["songId"] for song in songs] == [1, 2, 3]
+
+
+def test_nos_upload_url_and_headers(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "a.mp3"
+    path.write_bytes(b"abc")
+    client = make_client()
+    monkeypatch.setattr(client, "_get_nos_host", lambda: "upload.example")
+    captured = {}
+
+    def fake_post(url, content=None, headers=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        return httpx.Response(200)
+
+    monkeypatch.setattr(client._http, "post", fake_post)
+    client.upload_to_nos({"objectKey": "a/b", "token": "tok"}, path, "md5", "mp3")
+    assert captured["url"].startswith(
+        "http://upload.example/" + NOS_BUCKET + "/a%2Fb?"
+    )
+    assert captured["headers"]["x-nos-token"] == "tok"
+    assert captured["headers"]["Content-MD5"] == "md5"
+
+
+def test_login_status_requires_profile() -> None:
+    client = make_client()
+    client._weapi = lambda *a, **k: {"code": 200, "profile": None, "account": None}  # type: ignore[method-assign]
+    with pytest.raises(AuthError):
+        client.login_status()
+
+
+def test_absorb_set_cookie() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"code": 200},
+            headers={"set-cookie": "MUSIC_U=new; Path=/"},
+        )
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    client._weapi("/weapi/test", {})
+    assert client.cookies["MUSIC_U"] == "new"

@@ -1,0 +1,47 @@
+[
+  {
+    "stepTitle": "同步设置",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_music_dir",
+        "label": "音乐目录",
+        "initValue": "/vol1/1000/Music",
+        "helpText": "NAS 上的绝对路径，修改后应用会自动重启。",
+        "rules": [
+          { "required": true, "message": "请填写音乐目录" },
+          { "pattern": "^/.*", "message": "必须是以 / 开头的绝对路径" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_interval",
+        "label": "扫描间隔（秒）",
+        "initValue": "3600",
+        "rules": [
+          { "required": true, "message": "请填写扫描间隔" },
+          { "pattern": "^[0-9]+$", "message": "只能填写数字" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_timezone",
+        "label": "时区",
+        "initValue": "Asia/Shanghai",
+        "rules": [
+          { "required": true, "message": "请填写时区" }
+        ]
+      },
+      {
+        "type": "select",
+        "field": "wizard_dry_run",
+        "label": "试运行模式",
+        "initValue": "false",
+        "options": [
+          { "label": "关闭（真正上传）", "value": "false" },
+          { "label": "开启（只检查不上传）", "value": "true" }
+        ]
+      }
+    ]
+  }
+]

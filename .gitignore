@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.deps/
+.pipfix/
+.tmp/
+.wheels/
+.pytest-tmp*/
+pip-*/
+d700/
+tfix*/
+probe-*/
+pytest-cache-files-*/
+config.example/
+.tools/
+deploy/fnos/wy-music-cloud/app/docker/context/
+deploy/fnos/wy-music-cloud/app/docker/.env
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Runtime data
+data/
+config/
+.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+qr.png
+session.json
+last_run.json
+
+# OS
+.DS_Store
+Thumbs.db

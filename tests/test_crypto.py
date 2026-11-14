@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import base64
+import json
+
+import pytest
+from Crypto.Cipher import AES
+
+from wy_music_cloud.crypto import (
+    IV,
+    PRESET_KEY,
+    PUBLIC_KEY_B64,
+    encrypt_weapi,
+    random_secret,
+    rsa_encrypt_secret,
+)
+
+
+def unpad(data: bytes) -> bytes:
+    return data[:-data[-1]]
+
+
+def decrypt_params(form: dict, secret: str) -> dict:
+    step = AES.new(secret.encode(), AES.MODE_CBC, IV).decrypt(
+        base64.b64decode(form["params"])
+    )
+    inner = base64.b64decode(unpad(step))
+    raw = AES.new(PRESET_KEY, AES.MODE_CBC, IV).decrypt(inner)
+    return json.loads(unpad(raw))
+
+
+def test_random_secret_is_base62_and_16_chars() -> None:
+    secret = random_secret()
+    assert len(secret) == 16
+    assert all(ch.isalnum() for ch in secret)
+    assert secret != random_secret()
+
+
+def test_encrypt_weapi_roundtrip() -> None:
+    payload = {"limit": 10, "offset": 0, "name": "周杰伦", "nested": {"a": [1, 2]}}
+    secret = "AbCdEfGhIjKlMnOp"
+    form = encrypt_weapi(payload, secret)
+    assert set(form) == {"params", "encSecKey"}
+    assert len(form["encSecKey"]) == 256
+    assert decrypt_params(form, secret) == payload
+
+
+def test_encrypt_weapi_is_deterministic_for_fixed_secret() -> None:
+    assert encrypt_weapi({"a": 1}, "0" * 16) == encrypt_weapi({"a": 1}, "0" * 16)
+
+
+def test_encrypt_weapi_rejects_bad_secret() -> None:
+    with pytest.raises(ValueError):
+        encrypt_weapi({"a": 1}, "short")
+
+
+def test_public_key_is_1024_bit() -> None:
+    assert len(base64.b64decode(PUBLIC_KEY_B64)) > 0
+    assert len(rsa_encrypt_secret("0" * 16)) == 256

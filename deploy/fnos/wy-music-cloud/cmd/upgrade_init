@@ -1,0 +1,5 @@
+#!/bin/bash
+set -euo pipefail
+
+# 生命周期初始化钩子：参数校验和目录准备在对应 callback 中完成。
+exit 0

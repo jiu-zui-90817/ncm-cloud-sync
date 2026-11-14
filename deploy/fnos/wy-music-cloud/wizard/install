@@ -1,0 +1,70 @@
+[
+  {
+    "stepTitle": "同步设置",
+    "items": [
+      {
+        "type": "text",
+        "field": "wizard_music_dir",
+        "label": "音乐目录",
+        "initValue": "/vol1/1000/Music",
+        "helpText": "NAS 上的绝对路径，会以只读方式挂载到容器。",
+        "rules": [
+          { "required": true, "message": "请填写音乐目录" },
+          { "pattern": "^/.*", "message": "必须是以 / 开头的绝对路径" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_interval",
+        "label": "扫描间隔（秒）",
+        "initValue": "3600",
+        "helpText": "默认每小时扫描一次。",
+        "rules": [
+          { "required": true, "message": "请填写扫描间隔" },
+          { "pattern": "^[0-9]+$", "message": "只能填写数字" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_timezone",
+        "label": "时区",
+        "initValue": "Asia/Shanghai",
+        "rules": [
+          { "required": true, "message": "请填写时区" }
+        ]
+      },
+      {
+        "type": "select",
+        "field": "wizard_dry_run",
+        "label": "试运行模式",
+        "initValue": "false",
+        "options": [
+          { "label": "关闭（真正上传）", "value": "false" },
+          { "label": "开启（只检查不上传）", "value": "true" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_puid",
+        "label": "运行 UID",
+        "initValue": "1000",
+        "helpText": "容器以该 UID 运行，需要能读取音乐目录。飞牛用户通常是 1000。",
+        "rules": [
+          { "required": true, "message": "请填写 UID" },
+          { "pattern": "^[0-9]+$", "message": "只能填写数字" }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_pgid",
+        "label": "运行 GID",
+        "initValue": "1000",
+        "helpText": "通常与 UID 相同。",
+        "rules": [
+          { "required": true, "message": "请填写 GID" },
+          { "pattern": "^[0-9]+$", "message": "只能填写数字" }
+        ]
+      }
+    ]
+  }
+]

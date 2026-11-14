@@ -1,0 +1,70 @@
+# wy-music-cloud 配置示例
+# 复制为 config.yaml 后修改。容器内路径以 /music、/data 为准。
+
+# 要扫描的音乐目录，可以写多个。
+# 相对路径会相对于本配置文件所在目录解析。
+music_dirs:
+  - /music
+  # - /music2
+
+# 状态库、session.json、qr.png、last_run.json 的存放目录。
+data_dir: /data
+
+# 可选：直接写 Cookie（不推荐，优先用 wy-music-cloud login）。
+cookie: ""
+
+# 可选：从文件读取 Cookie，文件内容可以是 Cookie 字符串、JSON 对象或单独的 MUSIC_U。
+cookie_file: null
+
+# 扫描的音频扩展名（小写，不带点）。
+extensions:
+  - mp3
+  - flac
+  - m4a
+  - aac
+  - ogg
+  - opus
+  - wav
+  - wma
+  - ape
+
+# 允许上传的扩展名。网易云对 ape/wma 等格式支持有限，默认不传。
+upload_extensions:
+  - mp3
+  - flac
+  - m4a
+  - aac
+  - ogg
+  - opus
+  - wav
+
+# 跳过的目录/文件通配符。
+exclude:
+  - ".*"
+  - "@eaDir"
+  - "#recycle"
+  - "lost+found"
+
+# daemon 轮询间隔（秒）。3600 = 每小时。
+interval: 3600
+
+# 两次上传之间的额外等待（秒），避免请求过快。
+rate_limit: 0.5
+
+# 单次 HTTP 超时（秒）。
+timeout: 30
+
+# 网络错误 / 5xx 的重试次数。
+retries: 3
+
+# 小于该字节数的文件跳过；0 表示不限制。
+min_size: 0
+
+# 大于该字节数的文件标记失败；0 表示不限制。
+max_upload_size: 0
+
+# 全局试跑。命令行 --dry-run 也会打开。
+dry_run: false
+
+# DEBUG / INFO / WARNING / ERROR
+log_level: INFO

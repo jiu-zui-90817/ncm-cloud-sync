@@ -1,0 +1,24 @@
+#!/bin/bash
+
+CONTAINER_NAME="wy-music-cloud"
+
+case "$1" in
+  start)
+    # Docker 项目由应用中心启动，这里无需重复操作。
+    exit 0
+    ;;
+  stop)
+    # Docker 项目由应用中心停止，这里无需重复操作。
+    exit 0
+    ;;
+  status)
+    if docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -q '^true$'; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "未知命令: $1" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    exit 1
+    ;;
+esac
