@@ -309,33 +309,82 @@
     });
   }
 
-  function loadDiagnostics() {
-    var view = el("diagnosticsView");
+  function formatDiagnostics(data) {
+    var lines = [];
+    lines.push("版本: " + (data.version || "-"));
+    lines.push("数据目录: " + (data.data_dir || "-"));
+    lines.push("设置文件: " + (data.settings_path || "-"));
+    lines.push("Python: " + (data.python || "-") + "  " + (data.platform || "-"));
+    lines.push("进程 PID: " + (data.pid || "-"));
+    lines.push("Unix Socket: " + (data.socket || "(未启用)"));
+    lines.push("工作目录: " + (data.cwd || "-"));
+    ["TRIM_APPDEST", "TRIM_PKGVAR", "WY_MUSIC_DATA_DIR", "WY_MUSIC_SETTINGS", "WY_MUSIC_LOG_FILE"].forEach(function (key) {
+      lines.push(key + ": " + ((data.env && data.env[key]) || "(空)"));
+    });
+    lines.push("");
+    lines.push("日志文件:");
+    (data.log_paths || []).forEach(function (item) {
+      lines.push("  " + item.path + "  " + (item.exists ? ("存在，" + (item.size || 0) + " 字节") : "不存在"));
+    });
+    lines.push("");
+    lines.push("最近日志:");
+    lines.push(data.logs || "暂无日志");
+    return lines.join("\n");
+  }
+
+  function collectDiagnostics() {
+    return api("/api/diagnostics").then(formatDiagnostics);
+  }
+
+  function loadDiagnostics(viewId) {
+    var view = el(viewId || "diagnosticsView");
     view.classList.remove("hidden");
     view.textContent = "加载中…";
-    api("/api/diagnostics").then(function (data) {
-      var lines = [];
-      lines.push("版本: " + (data.version || "-"));
-      lines.push("数据目录: " + (data.data_dir || "-"));
-      lines.push("设置文件: " + (data.settings_path || "-"));
-      lines.push("Python: " + (data.python || "-") + "  " + (data.platform || "-"));
-      lines.push("进程 PID: " + (data.pid || "-"));
-      lines.push("Unix Socket: " + (data.socket || "(未启用)"));
-      lines.push("工作目录: " + (data.cwd || "-"));
-      ["TRIM_APPDEST", "TRIM_PKGVAR", "WY_MUSIC_DATA_DIR", "WY_MUSIC_SETTINGS", "WY_MUSIC_LOG_FILE"].forEach(function (key) {
-        lines.push(key + ": " + ((data.env && data.env[key]) || "(空)"));
-      });
-      lines.push("");
-      lines.push("日志文件:");
-      (data.log_paths || []).forEach(function (item) {
-        lines.push("  " + item.path + "  " + (item.exists ? ("存在，" + (item.size || 0) + " 字节") : "不存在"));
-      });
-      lines.push("");
-      lines.push("最近日志:");
-      lines.push(data.logs || "暂无日志");
-      view.textContent = lines.join("\n");
+    return collectDiagnostics().then(function (text) {
+      view.textContent = text;
+      return text;
     }).catch(function (error) {
       view.textContent = error.message;
+      return "";
+    });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      try {
+        if (document.execCommand("copy")) {
+          resolve();
+        } else {
+          reject(new Error("复制失败，请手动选择文本"));
+        }
+      } catch (error) {
+        reject(error);
+      } finally {
+        document.body.removeChild(area);
+      }
+    });
+  }
+
+  function copyDiagnostics() {
+    el("diagnosticsStatus").textContent = "正在收集…";
+    collectDiagnostics().then(function (text) {
+      return copyText(text).then(function () {
+        el("diagnosticsStatus").textContent = "已复制";
+        showToast("诊断信息已复制");
+      });
+    }).catch(function (error) {
+      el("diagnosticsStatus").textContent = error.message;
+      showToast(error.message, true);
     });
   }
 
@@ -394,7 +443,14 @@
   function bind() {
     el("qrButton").addEventListener("click", startQr);
     el("cookieButton").addEventListener("click", cookieLogin);
-    el("diagnosticsButton").addEventListener("click", loadDiagnostics);
+    el("diagnosticsButton").addEventListener("click", function () { loadDiagnostics("diagnosticsView"); });
+    el("loginDiagnosticsButton").addEventListener("click", function () { loadDiagnostics("loginDiagnosticsView"); });
+    el("copyDiagnosticsButton").addEventListener("click", copyDiagnostics);
+    el("loginDiagnostics").addEventListener("toggle", function () {
+      if (el("loginDiagnostics").open && el("loginDiagnosticsView").classList.contains("hidden")) {
+        loadDiagnostics("loginDiagnosticsView");
+      }
+    });
     el("syncButton").addEventListener("click", function () { syncNow(false); });
     el("dryRunButton").addEventListener("click", function () { syncNow(true); });
     el("refreshButton").addEventListener("click", function () { loadStatus(false); });

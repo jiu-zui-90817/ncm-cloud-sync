@@ -55,6 +55,16 @@
           <span id="cookieStatus" class="status-line"></span>
         </div>
       </details>
+      <details id="loginDiagnostics" class="cookie-login">
+        <summary>查看诊断 / 日志（登录失败时先看这里）</summary>
+        <p class="hint">显示真实数据目录、日志文件路径、Python 与进程信息，以及最近日志。升级后仍登录失败，请复制这里的内容反馈。</p>
+        <div class="form-actions">
+          <button id="loginDiagnosticsButton" class="btn ghost" type="button">加载诊断信息</button>
+          <button id="copyDiagnosticsButton" class="btn ghost" type="button">复制诊断</button>
+          <span id="diagnosticsStatus" class="status-line"></span>
+        </div>
+        <pre id="loginDiagnosticsView" class="log-view hidden"></pre>
+      </details>
     </section>
 
     <div id="dashboard" class="dashboard hidden">

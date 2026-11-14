@@ -85,3 +85,18 @@ def encrypt_weapi(payload: dict, secret: str | None = None) -> dict[str, str]:
         "params": base64.b64encode(second).decode("ascii"),
         "encSecKey": rsa_encrypt_secret(secret),
     }
+
+
+EAPI_KEY = b"e82ckenh8dichen8"
+
+
+def encrypt_eapi(uri: str, payload: dict) -> dict[str, str]:
+    """把业务参数加密成 eapi 请求体（AES-128-ECB，PC 客户端扫码登录用）。
+
+    uri 必须是 /api/... 形式的接口路径；它同时参与签名，不能省略或改写。
+    """
+    text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.md5(f"nobody{uri}use{text}md5forencrypt".encode("utf-8")).hexdigest()
+    plain = f"{uri}-36cd479b6b5-{text}-36cd479b6b5-{digest}".encode("utf-8")
+    encrypted = AES.new(EAPI_KEY, AES.MODE_ECB).encrypt(_pkcs7_pad(plain))
+    return {"params": encrypted.hex().upper()}

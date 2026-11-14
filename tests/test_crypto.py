@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 
 import pytest
 from Crypto.Cipher import AES
 
 from wy_music_cloud.crypto import (
+    EAPI_KEY,
     IV,
     PRESET_KEY,
     PUBLIC_KEY_B64,
     anonymous_username,
+    encrypt_eapi,
     encrypt_weapi,
     random_secret,
     rsa_encrypt_secret,
@@ -66,3 +69,15 @@ def test_anonymous_username_matches_known_vector() -> None:
         "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUYwMTIzNDU2Nzg5QUJDREVGMDEyMy"
         "BYa2pIc2o5dnlXcTVRNDdCdXYyVWNnPT0="
     )
+
+
+def test_encrypt_eapi_roundtrip_and_signature() -> None:
+    uri = "/api/login/qrcode/unikey"
+    payload = {"type": 3, "header": {"os": "pc", "deviceId": "ABC"}}
+    form = encrypt_eapi(uri, payload)
+    raw = unpad(AES.new(EAPI_KEY, AES.MODE_ECB).decrypt(bytes.fromhex(form["params"]))).decode()
+    prefix = uri + "-36cd479b6b5-"
+    assert raw.startswith(prefix)
+    text, _, digest = raw[len(prefix):].partition("-36cd479b6b5-")
+    assert json.loads(text) == payload
+    assert digest == hashlib.md5(f"nobody{uri}use{text}md5forencrypt".encode()).hexdigest()

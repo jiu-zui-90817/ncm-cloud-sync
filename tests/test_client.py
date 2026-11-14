@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import hashlib
+import json
+from urllib.parse import parse_qs
+
 import httpx
 import pytest
+from Crypto.Cipher import AES
 
 import wy_music_cloud.client as client_module
+from wy_music_cloud.crypto import EAPI_KEY
 from wy_music_cloud.client import CloudClient, NOS_BUCKET
 from wy_music_cloud.errors import ApiError, AuthError
 
@@ -186,41 +192,69 @@ def test_nos_upload_url_and_headers(tmp_path: Path, monkeypatch) -> None:
     assert captured["headers"]["Content-MD5"] == "md5"
 
 
-def test_qr_unikey_uses_weapi_with_anonymous_device() -> None:
-    client = make_client()
-    calls: list[tuple] = []
+def _decode_eapi(request: httpx.Request) -> tuple[str, dict, str]:
+    params = parse_qs(request.content.decode("utf-8"))["params"][0]
+    raw = AES.new(EAPI_KEY, AES.MODE_ECB).decrypt(bytes.fromhex(params))
+    text = raw[: -raw[-1]].decode("utf-8")
+    uri, _, rest = text.partition("-36cd479b6b5-")
+    body, _, digest = rest.partition("-36cd479b6b5-")
+    return uri, json.loads(body), digest
 
-    def fake_weapi(path, payload=None, **kwargs):
-        calls.append((path, payload, kwargs))
-        return {"code": 200, "unikey": "key"}
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
+def test_qr_unikey_uses_eapi_pc_identity() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["cookie"] = request.headers.get("cookie", "")
+        seen["uri"], seen["payload"], _digest = _decode_eapi(request)
+        return httpx.Response(
+            200,
+            json={"code": 200, "unikey": "key"},
+            headers={"set-cookie": "NMTID=nmtid; Path=/; Domain=.music.163.com"},
+        )
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
     assert client.qr_unikey() == "key"
-    path, payload, _kwargs = calls[0]
-    assert path == "/weapi/login/qrcode/unikey"
-    assert payload == {"type": 3}
-    assert len(client.cookies["deviceId"]) == 52
-    assert client.cookies["deviceId"].isupper()
-    assert client.cookies["appver"] == client_module.ANON_APPVER
-    assert client.cookies["_ntes_nuid"]
-    assert client.cookies["WNMCID"].endswith(".01.0")
-    assert client._device_ip.startswith("116.")
+    assert seen["url"] == "https://interfacepc.music.163.com/eapi/login/qrcode/unikey"
+    assert seen["uri"] == "/api/login/qrcode/unikey"
+    assert seen["payload"]["type"] == 3
+    assert seen["payload"]["e_r"] is False
+    header = seen["payload"]["header"]
+    assert header["os"] == "pc"
+    assert header["appver"] == client_module.ANON_APPVER
+    assert len(header["deviceId"]) == 52
+    assert header["deviceId"].isupper()
+    assert "deviceId=" in seen["cookie"]
+    assert "appver=3.1.17.204416" in seen["cookie"]
+    assert client.cookies["NMTID"] == "nmtid"
 
 
-def test_qr_status_uses_weapi_with_anonymous_device() -> None:
-    client = make_client()
-    calls: list[tuple] = []
+def test_qr_status_absorbs_last_nonempty_set_cookie() -> None:
+    seen: dict = {}
 
-    def fake_weapi(path, payload=None, **kwargs):
-        calls.append((path, payload, kwargs))
-        return {"code": 801, "message": "等待扫码"}
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["uri"], seen["payload"], _digest = _decode_eapi(request)
+        return httpx.Response(
+            200,
+            json={"code": 803},
+            headers=[
+                ("set-cookie", "MUSIC_U=first; Path=/"),
+                ("set-cookie", "MUSIC_U=; Max-Age=0; Path=/"),
+                ("set-cookie", "MUSIC_U=final; Path=/"),
+                ("set-cookie", "__csrf=csrf2; Path=/"),
+            ],
+        )
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
-    assert client.qr_status("key")["code"] == 801
-    path, payload, _kwargs = calls[0]
-    assert path == "/weapi/login/qrcode/client/login"
-    assert payload == {"key": "key", "type": 3}
-    assert "deviceId" in client.cookies
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    assert client.qr_status("key")["code"] == 803
+    assert seen["url"] == "https://interfacepc.music.163.com/eapi/login/qrcode/client/login"
+    assert seen["uri"] == "/api/login/qrcode/client/login"
+    assert seen["payload"]["key"] == "key"
+    assert seen["payload"]["type"] == 3
+    assert client.cookies["MUSIC_U"] == "final"
+    assert client.cookies["__csrf"] == "csrf2"
 
 
 def test_login_status_requires_profile() -> None:

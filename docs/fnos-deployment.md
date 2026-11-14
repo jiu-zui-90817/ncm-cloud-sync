@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.5.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.6.fpk`）。
 
 自行构建：
 
@@ -171,11 +171,11 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口要求带匿名设备上下文。0.2.5 起改为 `weapi/login/qrcode/unikey` + `type=3`，并在请求前补齐 `deviceId`、`_ntes_nuid`、`WNMCID` 等 Cookie，和网易云桌面客户端的做法一致；二维码本身仍只带 `codekey`。0.2.4 只调用了公开的 `/api/login/qrcode/*`，缺少设备 Cookie，手机确认后会报“数据加载失败”。升级到 **0.2.5**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败，展开“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.6**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 
-0.2.4 起服务端带内存日志缓冲。打开页面底部日志卡片，点“查看诊断”，会列出真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使 `app.log` 因权限没写成，也能看到内存日志。反馈问题时复制整段诊断内容即可。
+0.2.4 起服务端带内存日志缓冲。登录前可以在登录卡片展开“查看诊断 / 日志（登录失败时先看这里）”，登录后也可以在页面底部日志卡片点“查看诊断”。它会列出真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使 `app.log` 因权限没写成，也能看到内存日志。反馈问题时点“复制诊断”即可。
 
 **同步失败**
 

@@ -20,7 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from .cookies import cookie_header, ensure_defaults
-from .crypto import anonymous_username, encrypt_weapi
+from .crypto import anonymous_username, encrypt_eapi, encrypt_weapi
 from .errors import ApiError, AuthError, UploadError
 from .hashing import file_md5
 from .metadata import display_album, display_artist, read_tags, sanitize_filename
@@ -51,6 +51,12 @@ CONTENT_TYPES = {
 AUTH_ERROR_CODES = {301, 302}
 ANON_APPVER = "3.1.17.204416"
 ANON_OSVER = "Microsoft-Windows-10-Professional-build-19045-64bit"
+EAPI_PC_URL = "https://interfacepc.music.163.com"
+EAPI_PC_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 "
+    "NeteaseMusicDesktop/3.1.29.205117"
+)
 
 
 @dataclass
@@ -137,6 +143,7 @@ class CloudClient:
         *,
         headers: dict[str, str] | None = None,
         check: bool = True,
+        cookie_sink: list[str] | None = None,
     ) -> dict[str, Any]:
         merged = self._headers()
         if headers:
@@ -146,6 +153,8 @@ class CloudClient:
             try:
                 response = self._http.post(url, data=data, headers=merged)
                 self._absorb_cookies(response)
+                if cookie_sink is not None:
+                    cookie_sink.extend(response.headers.get_list("set-cookie"))
                 if response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         f"服务端错误 {response.status_code}",
@@ -171,6 +180,18 @@ class CloudClient:
         for key, value in response.cookies.items():
             self.cookies[key] = value
 
+    def _absorb_cookie_lines(self, lines: list[str]) -> None:
+        """吸收原始 Set-Cookie 行，保留最后一个非空值。"""
+        for line in lines:
+            pair = line.split(";", 1)[0].strip()
+            if "=" not in pair:
+                continue
+            key, value = pair.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if key and value:
+                self.cookies[key] = value
+
     def _weapi(
         self,
         path: str,
@@ -195,6 +216,56 @@ class CloudClient:
             headers=request_headers,
             check=check,
         )
+
+    def _eapi_pc(
+        self,
+        uri: str,
+        payload: dict[str, Any],
+        *,
+        check: bool = True,
+    ) -> dict[str, Any]:
+        """用 PC 客户端身份调用 interfacepc eapi。
+
+        2026-10 起网页 weapi 的扫码 unikey 会被风控（-462）；当前可用的
+        流程是 eapi + PC 头 + type=3，参考 api-enhanced / Ncrust。
+        """
+        device_id = self._ensure_anonymous_device()
+        now_ms = int(time.time() * 1000)
+        header = {
+            "osver": ANON_OSVER,
+            "deviceId": device_id,
+            "os": "pc",
+            "appver": ANON_APPVER,
+            "versioncode": "140",
+            "mobilename": "",
+            "buildver": str(now_ms)[:10],
+            "resolution": "1920x1080",
+            "__csrf": "",
+            "channel": "netease",
+            "requestId": f"{now_ms}_{secrets.randbelow(10000):04d}",
+        }
+        body = dict(payload)
+        body["e_r"] = False
+        body["header"] = header
+        form = encrypt_eapi(uri, body)
+        cookie = "; ".join(
+            f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
+            for key, value in header.items()
+        )
+        lines: list[str] = []
+        result = self._post_json(
+            EAPI_PC_URL + "/eapi/" + uri[len("/api/"):],
+            form,
+            headers={
+                "User-Agent": EAPI_PC_USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": cookie,
+            },
+            check=check,
+            cookie_sink=lines,
+        )
+        self._absorb_cookie_lines(lines)
+        return result
 
     # -- 匿名设备上下文 ---------------------------------------------------
     @staticmethod
@@ -269,13 +340,8 @@ class CloudClient:
 
     # -- 扫码 / 手机号登录 ------------------------------------------------
     def qr_unikey(self) -> str:
-        # 与 NEMbox 一致：weapi + type 3，并且必须先准备匿名设备 Cookie。
-        self._ensure_anonymous_device()
-        body = self._weapi(
-            "/weapi/login/qrcode/unikey",
-            {"type": 3},
-            headers={"Cookie": cookie_header(self.cookies, quote_values=False)},
-        )
+        # 2026-10 起网页 weapi 扫码会被风控（-462），改走 eapi PC 身份 + type=3。
+        body = self._eapi_pc("/api/login/qrcode/unikey", {"type": 3})
         key = body.get("unikey") or body.get("key")
         if not key:
             raise AuthError(f"获取二维码 key 失败: {body}")
@@ -283,12 +349,10 @@ class CloudClient:
 
     def qr_status(self, key: str) -> dict[str, Any]:
         # 800/801/802/803/8821 都是业务状态，不走 code==200 校验。
-        self._ensure_anonymous_device()
-        return self._weapi(
-            "/weapi/login/qrcode/client/login",
+        return self._eapi_pc(
+            "/api/login/qrcode/client/login",
             {"key": key, "type": 3},
             check=False,
-            headers={"Cookie": cookie_header(self.cookies, quote_values=False)},
         )
 
     def phone_login(self, phone: str, password: str, countrycode: str = "86") -> dict[str, Any]:
