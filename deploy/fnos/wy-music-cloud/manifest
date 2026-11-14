@@ -1,5 +1,5 @@
 appname=wy-music-cloud
-version=0.2.0
+version=0.2.1
 display_name=网易云音乐云盘同步
 desc=原生飞牛应用：带 Web 界面和扫码登录，把本地音乐自动同步到网易云音乐云盘，支持本地与云端双重去重。
 source=thirdparty
@@ -15,4 +15,4 @@ disable_authorization_path=false
 install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=wy-music-cloud.main
-changelog=0.2.0：改为原生应用，不再依赖 Docker；新增 Web 管理界面、扫码登录、状态与日志查看。
+changelog=0.2.1：修复音乐目录粘贴换行导致的安装失败，并区分目录不存在/无读取权限等错误；0.2.0：改为原生应用，不再依赖 Docker；新增 Web 管理界面、扫码登录、状态与日志查看。

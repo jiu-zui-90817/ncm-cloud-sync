@@ -18,19 +18,29 @@ validate_int() {
   [ "$value" -ge "$min" ] && [ "$value" -le "$max" ]
 }
 
-validate_music_dir() {
+normalize_music_dir() {
   local dir="$1"
-  [ -n "$dir" ] || return 1
+  # 从聊天/文件管理器粘贴时经常带换行，去掉后再校验。
+  dir="$(printf '%s' "$dir" | tr -d '\r\n')"
+  dir="${dir#"${dir%%[![:space:]]*}"}"
+  dir="${dir%"${dir##*[![:space:]]}"}"
+  printf '%s' "$dir"
+}
+
+music_dir_error() {
+  local dir="$1"
+  [ -n "$dir" ] || { printf '路径为空'; return 1; }
   case "$dir" in
     /*) ;;
-    *) return 1 ;;
+    *) printf '必须是绝对路径，以 / 开头'; return 1 ;;
   esac
   # JSON 字符串里最容易出问题的字符，直接拒绝，避免手工拼 JSON 出错。
   case "$dir" in
-    *'"'*|*\\*|*$'\n'*|*$'\r'*) return 1 ;;
+    *'"'*|*\\*) printf '路径不能包含双引号或反斜杠'; return 1 ;;
   esac
-  [ -d "$dir" ] || return 1
-  [ -r "$dir" ] || return 1
+  [ -e "$dir" ] || { printf '目录不存在'; return 1; }
+  [ -d "$dir" ] || { printf '这不是目录'; return 1; }
+  [ -r "$dir" ] || { printf '应用用户没有读取权限，请在应用中心授权该目录，或给应用用户 wy-music-cloud 读权限'; return 1; }
   return 0
 }
 
@@ -70,12 +80,18 @@ write_login_hint() {
 
 apply_wizard_settings() {
   local appdir="$1" vardir="$2"
-  local music="${wizard_music_dir:-/vol1/1000/Music}"
-  local interval="${wizard_interval:-3600}"
-  local dry_run="${wizard_dry_run:-false}"
-  local log_level="${wizard_log_level:-INFO}"
+  local music interval dry_run log_level reason
+  music="$(normalize_music_dir "${wizard_music_dir:-/vol1/1000/Music}")"
+  interval="${wizard_interval:-3600}"
+  dry_run="${wizard_dry_run:-false}"
+  log_level="${wizard_log_level:-INFO}"
 
-  validate_music_dir "$music" || fail "音乐目录无效或不可读：$music（必须使用绝对路径）"
+  if ! reason="$(music_dir_error "$music")"; then
+    if [ -n "${TRIM_DATA_ACCESSIBLE_PATHS:-}" ]; then
+      reason="$reason。应用当前已授权的目录：${TRIM_DATA_ACCESSIBLE_PATHS//:/、}"
+    fi
+    fail "音乐目录不可用：$music（$reason）"
+  fi
   validate_int "$interval" 60 86400 || fail "同步间隔必须是 60-86400 秒之间的整数"
   case "$dry_run" in true|false) ;; *) fail "演练模式只能是 true 或 false" ;; esac
   validate_log_level "$log_level" || fail "日志级别只能是 DEBUG/INFO/WARNING/ERROR"
