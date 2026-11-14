@@ -186,36 +186,41 @@ def test_nos_upload_url_and_headers(tmp_path: Path, monkeypatch) -> None:
     assert captured["headers"]["Content-MD5"] == "md5"
 
 
-def test_qr_unikey_uses_plain_official_api() -> None:
+def test_qr_unikey_uses_weapi_with_anonymous_device() -> None:
     client = make_client()
     calls: list[tuple] = []
 
-    def fake_post(url, payload=None, **kwargs):
-        calls.append((url, payload, kwargs))
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
         return {"code": 200, "unikey": "key"}
 
-    client._post_json = fake_post  # type: ignore[method-assign]
+    client._weapi = fake_weapi  # type: ignore[method-assign]
     assert client.qr_unikey() == "key"
-    url, payload, _kwargs = calls[0]
-    assert url == client_module.BASE_URL + "/api/login/qrcode/unikey"
-    assert payload == {"type": 1}
-    assert "noCheckToken" not in payload
+    path, payload, _kwargs = calls[0]
+    assert path == "/weapi/login/qrcode/unikey"
+    assert payload == {"type": 3}
+    assert len(client.cookies["deviceId"]) == 52
+    assert client.cookies["deviceId"].isupper()
+    assert client.cookies["appver"] == client_module.ANON_APPVER
+    assert client.cookies["_ntes_nuid"]
+    assert client.cookies["WNMCID"].endswith(".01.0")
+    assert client._device_ip.startswith("116.")
 
 
-def test_qr_status_uses_plain_official_api() -> None:
+def test_qr_status_uses_weapi_with_anonymous_device() -> None:
     client = make_client()
     calls: list[tuple] = []
 
-    def fake_post(url, payload=None, **kwargs):
-        calls.append((url, payload, kwargs))
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
         return {"code": 801, "message": "等待扫码"}
 
-    client._post_json = fake_post  # type: ignore[method-assign]
+    client._weapi = fake_weapi  # type: ignore[method-assign]
     assert client.qr_status("key")["code"] == 801
-    url, payload, _kwargs = calls[0]
-    assert url == client_module.BASE_URL + "/api/login/qrcode/client/login"
-    assert payload == {"key": "key", "type": 1}
-    assert "noCheckToken" not in payload
+    path, payload, _kwargs = calls[0]
+    assert path == "/weapi/login/qrcode/client/login"
+    assert payload == {"key": "key", "type": 3}
+    assert "deviceId" in client.cookies
 
 
 def test_login_status_requires_profile() -> None:

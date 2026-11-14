@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import secrets
+import string
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,7 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from .cookies import cookie_header, ensure_defaults
-from .crypto import encrypt_weapi
+from .crypto import anonymous_username, encrypt_weapi
 from .errors import ApiError, AuthError, UploadError
 from .hashing import file_md5
 from .metadata import display_album, display_artist, read_tags, sanitize_filename
@@ -47,6 +49,8 @@ CONTENT_TYPES = {
 }
 
 AUTH_ERROR_CODES = {301, 302}
+ANON_APPVER = "3.1.17.204416"
+ANON_OSVER = "Microsoft-Windows-10-Professional-build-19045-64bit"
 
 
 @dataclass
@@ -79,6 +83,7 @@ class CloudClient:
         self.rate_limit = max(0.0, rate_limit)
         self._nos_host: str | None = None
         self._nos_host_at = 0.0
+        self._device_ip: str | None = None
         self._http = httpx.Client(
             timeout=timeout,
             transport=transport,
@@ -103,6 +108,9 @@ class CloudClient:
     # -- HTTP / weapi -----------------------------------------------------
     def _headers(self) -> dict[str, str]:
         headers = {"Referer": BASE_URL}
+        if self._device_ip:
+            headers["X-Real-IP"] = self._device_ip
+            headers["X-Forwarded-For"] = self._device_ip
         if self.cookies:
             headers["Cookie"] = cookie_header(self.cookies)
         return headers
@@ -170,19 +178,72 @@ class CloudClient:
         *,
         host: str = BASE_URL,
         check: bool = True,
+        headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         url = host + path
         form = encrypt_weapi(payload or {})
         form["csrf_token"] = self.cookies.get("__csrf", "")
+        request_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": BASE_URL,
+        }
+        if headers:
+            request_headers.update(headers)
         return self._post_json(
             url,
             form,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": BASE_URL,
-            },
+            headers=request_headers,
             check=check,
         )
+
+    # -- 匿名设备上下文 ---------------------------------------------------
+    @staticmethod
+    def _gen_device_id() -> str:
+        return "".join(secrets.choice("0123456789ABCDEF") for _ in range(52))
+
+    @staticmethod
+    def _ip_for_device(device_id: str) -> str:
+        try:
+            seed = int(device_id[:8], 16)
+        except (TypeError, ValueError):
+            seed = 0
+        return (
+            f"116.{25 + seed % 70}."
+            f"{1 + (seed // 70) % 255}.{1 + (seed // (70 * 255)) % 255}"
+        )
+
+    def _ensure_anonymous_device(self) -> str:
+        """注入匿名设备 Cookie，供扫码接口校验。
+
+        网易云扫码接口并不是完全公开的：没有 deviceId / _ntes_nuid 等匿名
+        上下文时，二维码能生成，但手机确认后会提示“数据加载失败”。做法与
+        NEMbox / api-enhanced 一致，且同一 CloudClient 内保持不变。
+        """
+        device_id = str(self.cookies.get("deviceId") or "")
+        if len(device_id) != 52 or any(ch not in "0123456789ABCDEF" for ch in device_id):
+            device_id = self._gen_device_id()
+        self.cookies["deviceId"] = device_id
+
+        nuid = self.cookies.get("_ntes_nuid") or secrets.token_hex(32)
+        now_ms = int(time.time() * 1000)
+        defaults = {
+            "os": "pc",
+            "appver": ANON_APPVER,
+            "osver": ANON_OSVER,
+            "channel": "netease",
+            "__remember_me": "true",
+            "_ntes_nuid": nuid,
+            "_ntes_nnid": f"{nuid},{now_ms}",
+            "WNMCID": f"{''.join(secrets.choice(string.ascii_lowercase) for _ in range(6))}.{now_ms}.01.0",
+            "WEVNSM": "1.0.0",
+        }
+        for name, value in defaults.items():
+            self.cookies.setdefault(name, value)
+        # 扫码接口按桌面客户端版本校验，覆盖 ensure_defaults() 的旧版本号。
+        self.cookies["appver"] = ANON_APPVER
+        self._device_ip = self._ip_for_device(device_id)
+        logger.debug("匿名设备: deviceId=%s ip=%s", device_id, self._device_ip)
+        return device_id
 
     # -- 账号 -------------------------------------------------------------
     def login_status(self) -> dict[str, Any]:
@@ -208,30 +269,26 @@ class CloudClient:
 
     # -- 扫码 / 手机号登录 ------------------------------------------------
     def qr_unikey(self) -> str:
-        # 官方网页端扫码接口：普通 form，不走 weapi，也不需要 chainId。
-        body = self._post_json(
-            BASE_URL + "/api/login/qrcode/unikey",
-            {"type": 1},
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": BASE_URL,
-            },
+        # 与 NEMbox 一致：weapi + type 3，并且必须先准备匿名设备 Cookie。
+        self._ensure_anonymous_device()
+        body = self._weapi(
+            "/weapi/login/qrcode/unikey",
+            {"type": 3},
+            headers={"Cookie": cookie_header(self.cookies, quote_values=False)},
         )
-        key = body.get("unikey")
+        key = body.get("unikey") or body.get("key")
         if not key:
             raise AuthError(f"获取二维码 key 失败: {body}")
         return str(key)
 
     def qr_status(self, key: str) -> dict[str, Any]:
-        # 800/801/802/803 都是正常状态，不走统一的 code==200 校验。
-        return self._post_json(
-            BASE_URL + "/api/login/qrcode/client/login",
-            {"key": key, "type": 1},
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": BASE_URL,
-            },
+        # 800/801/802/803/8821 都是业务状态，不走 code==200 校验。
+        self._ensure_anonymous_device()
+        return self._weapi(
+            "/weapi/login/qrcode/client/login",
+            {"key": key, "type": 3},
             check=False,
+            headers={"Cookie": cookie_header(self.cookies, quote_values=False)},
         )
 
     def phone_login(self, phone: str, password: str, countrycode: str = "86") -> dict[str, Any]:

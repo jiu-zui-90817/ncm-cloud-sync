@@ -38,6 +38,10 @@ def test_cookie_header_url_encodes() -> None:
     assert cookie_header({"a": "1 2", "b": "x/y"}) == "a=1%202; b=x%2Fy"
 
 
+def test_cookie_header_can_keep_raw_values_for_qr() -> None:
+    assert cookie_header({"_ntes_nnid": "abc,123"}, quote_values=False) == "_ntes_nnid=abc,123"
+
+
 def test_redact_hides_secrets() -> None:
     result = redact({"MUSIC_U": "abcdef", "__csrf": "zzz", "os": "pc"})
     assert result["MUSIC_U"] == "abcd***"

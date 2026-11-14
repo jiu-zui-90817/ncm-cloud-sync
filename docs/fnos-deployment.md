@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.4.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.5.fpk`）。
 
 自行构建：
 
@@ -171,7 +171,7 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-0.2.4 起改用网易云官方网页端扫码接口（`/api/login/qrcode/unikey` 和 `/api/login/qrcode/client/login`），二维码只带 `codekey`，不再使用 `chainId` / `noCheckToken`。0.2.2 的旧接口和 0.2.3 的任意 `chainId` 都可能让手机端报“数据加载失败”。升级到 **0.2.4**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败，展开“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口要求带匿名设备上下文。0.2.5 起改为 `weapi/login/qrcode/unikey` + `type=3`，并在请求前补齐 `deviceId`、`_ntes_nuid`、`WNMCID` 等 Cookie，和网易云桌面客户端的做法一致；二维码本身仍只带 `codekey`。0.2.4 只调用了公开的 `/api/login/qrcode/*`，缺少设备 Cookie，手机确认后会报“数据加载失败”。升级到 **0.2.5**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败，展开“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 

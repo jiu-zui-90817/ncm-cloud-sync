@@ -61,8 +61,14 @@ def ensure_defaults(cookies: dict[str, str]) -> dict[str, str]:
     return result
 
 
-def cookie_header(cookies: dict[str, str]) -> str:
-    """与 NeteaseCloudMusicApi 一致，对 key/value 做 URL 编码。"""
+def cookie_header(cookies: dict[str, str], *, quote_values: bool = True) -> str:
+    """序列化 Cookie；默认与 NeteaseCloudMusicApi 一样做 URL 编码。
+
+    扫码登录需要和桌面客户端完全一致，传入 quote_values=False 发送原始值
+    （尤其是含逗号的 _ntes_nnid）。
+    """
+    if not quote_values:
+        return "; ".join(f"{key}={value}" for key, value in cookies.items())
     return "; ".join(
         f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
         for key, value in cookies.items()

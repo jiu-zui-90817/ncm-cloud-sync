@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from functools import lru_cache
@@ -56,6 +57,20 @@ def rsa_encrypt_secret(secret: str) -> str:
     block = secret.encode("utf-8")[::-1].rjust(size, b"\x00")
     encrypted = pow(bytes_to_long(block), key.e, key.n)
     return f"{encrypted:0{size * 2}x}"
+
+
+ANON_ID_XOR_KEY = b"3go8&$8*3*3h0k(2)2"
+
+
+def anonymous_username(device_id: str) -> str:
+    """网易云匿名设备注册用户名（api-enhanced register/anonimous）。"""
+    raw = device_id.encode("utf-8")
+    xored = bytes(
+        byte ^ ANON_ID_XOR_KEY[index % len(ANON_ID_XOR_KEY)]
+        for index, byte in enumerate(raw)
+    )
+    digest = base64.b64encode(hashlib.md5(xored).digest()).decode("ascii")
+    return base64.b64encode(f"{device_id} {digest}".encode("utf-8")).decode("ascii")
 
 
 def encrypt_weapi(payload: dict, secret: str | None = None) -> dict[str, str]:

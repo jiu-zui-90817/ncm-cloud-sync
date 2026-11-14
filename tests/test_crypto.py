@@ -10,6 +10,7 @@ from wy_music_cloud.crypto import (
     IV,
     PRESET_KEY,
     PUBLIC_KEY_B64,
+    anonymous_username,
     encrypt_weapi,
     random_secret,
     rsa_encrypt_secret,
@@ -57,3 +58,11 @@ def test_encrypt_weapi_rejects_bad_secret() -> None:
 def test_public_key_is_1024_bit() -> None:
     assert len(base64.b64decode(PUBLIC_KEY_B64)) > 0
     assert len(rsa_encrypt_secret("0" * 16)) == 256
+
+
+def test_anonymous_username_matches_known_vector() -> None:
+    device_id = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123"
+    assert anonymous_username(device_id) == (
+        "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUYwMTIzNDU2Nzg5QUJDREVGMDEyMy"
+        "BYa2pIc2o5dnlXcTVRNDdCdXYyVWNnPT0="
+    )
