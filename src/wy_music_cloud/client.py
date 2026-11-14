@@ -28,7 +28,6 @@ from .metadata import display_album, display_artist, read_tags, sanitize_filenam
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://music.163.com"
-INTERFACE_URL = "https://interface.music.163.com"
 NOS_BUCKET = "jd-musicrep-privatecloud-audio-public"
 NOS_LBS_URL = "https://wanproxy.127.net/lbs?version=1.0&bucketname=" + NOS_BUCKET
 USER_AGENT = (
@@ -203,6 +202,12 @@ class CloudClient:
         check: bool = True,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        # 网易云网页端约定：加密的 weapi 请求统一走 /weapi/ 路径。
+        # NCMApi 在发送前会把 /api/xxx 改写成 /weapi/xxx；直接向
+        # /api/xxx 发送 params/encSecKey 会被网关当成明文参数校验，
+        # 返回 [400] 参数错误。
+        if path.startswith("/api/"):
+            path = "/weapi/" + path[len("/api/"):]
         url = host + path
         form = encrypt_weapi(payload or {})
         form["csrf_token"] = self.cookies.get("__csrf", "")
@@ -399,18 +404,26 @@ class CloudClient:
 
     # -- 上传流程 ---------------------------------------------------------
     def check_upload(self, md5: str, size: int, ext: str) -> dict[str, Any]:
-        body = self._weapi(
-            "/api/cloud/upload/check",
-            {
-                "bitrate": "999000",
-                "ext": ext,
-                "length": str(size),
-                "md5": md5,
-                "songId": "0",
-                "version": 1,
-            },
-            host=INTERFACE_URL,
-        )
+        payload = {
+            "bitrate": "999000",
+            # 官方网页端查重固定传空 ext，类型由服务端按 md5/大小判断。
+            "ext": "",
+            "length": size,
+            "md5": md5,
+            "songId": "0",
+            "version": 1,
+        }
+        try:
+            body = self._weapi("/weapi/cloud/upload/check", payload)
+        except ApiError as exc:
+            # 400 参数错误通常意味着接口路径/字段又变了，把请求形状写进日志。
+            logger.error(
+                "云盘查重失败: size=%s ext=%s path=/weapi/cloud/upload/check error=%s",
+                size,
+                ext,
+                exc,
+            )
+            raise
         return {
             "need_upload": bool(body.get("needUpload")),
             "song_id": _as_int(body.get("songId"), 0) or None,
@@ -525,7 +538,6 @@ class CloudClient:
         self._weapi(
             "/api/cloud/pub/v2",
             {"songid": song_id},
-            host=INTERFACE_URL,
         )
 
     def upload(

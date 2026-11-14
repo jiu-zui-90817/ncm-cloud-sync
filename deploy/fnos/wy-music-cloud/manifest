@@ -1,5 +1,5 @@
 appname=wy-music-cloud
-version=0.2.7
+version=0.2.8
 display_name=网易云音乐云盘同步
 desc=原生飞牛应用：带 Web 界面和扫码登录，把本地音乐自动同步到网易云音乐云盘，支持本地与云端双重去重。
 source=thirdparty
@@ -15,4 +15,4 @@ disable_authorization_path=false
 install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=wy-music-cloud.main
-changelog=0.2.7：修复扫码成功后因同名 Cookie 多 Path 触发 CookieConflict 导致接口 500、页面退回登录；0.2.6：扫码登录改用 PC 客户端 eapi 接口（type 3），补齐设备标识和风控头，修复扫码确认后手机报“数据加载失败”；登录前可直接查看并复制诊断信息；0.2.5：尝试 weapi 匿名设备方案；0.2.4：改用官方网页接口并新增 Cookie 登录兜底、日志缓冲；0.2.3：尝试新版扫码参数；0.2.2：修复二维码域名；0.2.1：修复音乐目录粘贴换行；0.2.0：改为原生应用并新增 Web 界面。
+changelog=0.2.8：修复云盘查重接口误用 /api 路径导致 400 参数错误，统一按网页端改写为 /weapi 并校正查重字段；0.2.7：修复扫码成功后因同名 Cookie 多 Path 触发 CookieConflict 导致接口 500、页面退回登录；0.2.6：扫码登录改用 PC 客户端 eapi 接口（type 3），补齐设备标识和风控头，修复扫码确认后手机报“数据加载失败”；登录前可直接查看并复制诊断信息；0.2.5：尝试 weapi 匿名设备方案；0.2.4：改用官方网页接口并新增 Cookie 登录兜底、日志缓冲；0.2.3：尝试新版扫码参数；0.2.2：修复二维码域名；0.2.1：修复音乐目录粘贴换行；0.2.0：改为原生应用并新增 Web 界面。

@@ -33,9 +33,10 @@ def test_check_upload_payload() -> None:
     assert result["need_upload"] is True
     assert result["song_id"] == 12
     path, payload, kwargs = calls[0]
-    assert path == "/api/cloud/upload/check"
-    assert kwargs["host"] == client_module.INTERFACE_URL
-    assert payload["length"] == "123"
+    assert path == "/weapi/cloud/upload/check"
+    assert "host" not in kwargs
+    assert payload["ext"] == ""
+    assert payload["length"] == 123
     assert payload["md5"] == "abc"
 
 
@@ -156,6 +157,18 @@ def test_api_error_code() -> None:
     client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
     with pytest.raises(ApiError):
         client._weapi("/weapi/test", {})
+
+
+def test_weapi_rewrites_api_path_to_weapi() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(200, json={"code": 200})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    client._weapi("/api/cloud/upload/check", {})
+    assert seen == ["/weapi/cloud/upload/check"]
 
 
 def test_cloud_songs_pagination() -> None:

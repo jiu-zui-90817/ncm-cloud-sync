@@ -64,10 +64,14 @@ weapi 明文：`{}`
 
 返回 `code=200` 表示有效；`301` / `302` 通常表示未登录。
 
+## 3.1 weapi 路径约定
+
+weapi 请求的 URL 必须使用 `/weapi/...`。NCMApi 在发送前会把代码里的 `/api/...` 改写成 `/weapi/...`；如果直接把加密表单发到 `/api/...`，网关会按明文参数校验并返回 `[400] 参数错误`。本文件下面的路径都已经写成实际请求路径。
+
 ## 4. 云盘列表
 
 ```http
-POST https://music.163.com/api/v1/cloud/get
+POST https://music.163.com/weapi/v1/cloud/get
 ```
 
 weapi 明文：
@@ -81,13 +85,13 @@ weapi 明文：
 ## 5. 上传前检查（去重核心）
 
 ```http
-POST https://interface.music.163.com/api/cloud/upload/check
+POST https://music.163.com/weapi/cloud/upload/check
 ```
 
 weapi 明文：
 
 ```json
-{"bitrate":"999000","ext":"","length":<文件字节数>,"md5":"<32位小写md5>","songId":"0","version":1}
+{"bitrate":"999000","ext":"","length":<文件字节数，数字>,"md5":"<32位小写md5>","songId":"0","version":1}
 ```
 
 返回重点：
@@ -148,7 +152,7 @@ POST http://<host>/<bucket>/<objectKey>
 ## 10. 写入云盘信息
 
 ```http
-POST https://music.163.com/api/upload/cloud/info/v2
+POST https://music.163.com/weapi/upload/cloud/info/v2
 ```
 
 weapi 明文：
@@ -164,7 +168,7 @@ weapi 明文：
 ## 11. 发布到云盘
 
 ```http
-POST https://interface.music.163.com/api/cloud/pub/v2
+POST https://music.163.com/weapi/cloud/pub/v2
 ```
 
 weapi 明文：
@@ -194,7 +198,7 @@ check(md5,size)
 | 现象 | 可能原因 |
 | --- | --- |
 | `code=301/302` | Cookie 失效、未登录、风控 |
-| `code=400` | 参数不合法（不是登录问题） |
+| `code=400` | 参数不合法，或把 weapi 加密表单发到了 `/api/...` 而不是 `/weapi/...`（不是登录问题） |
 | NOS 403 / token 无效 | token 过期、objectKey 路径不对、Content-MD5 不匹配 |
 | `needUpload=false` 但列表看不到 | 已上传未发布，或客户端缓存；检查 pub/v2 是否成功 |
 | 上传成功但云盘不显示 | 发布失败、审核/格式限制、客户端刷新延迟 |
