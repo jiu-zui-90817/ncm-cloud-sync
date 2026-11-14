@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.6.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.7.fpk`）。
 
 自行构建：
 
@@ -171,7 +171,7 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.6**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.7**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 

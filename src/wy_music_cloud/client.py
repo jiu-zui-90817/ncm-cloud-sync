@@ -177,8 +177,10 @@ class CloudClient:
         raise UploadError(f"请求失败: {url}: {last_error}") from last_error
 
     def _absorb_cookies(self, response: httpx.Response) -> None:
-        for key, value in response.cookies.items():
-            self.cookies[key] = value
+        # 不能遍历 response.cookies：网易云同一个名字会在不同 Path 下重复
+        # 下发（例如 MUSIC_A_T），httpx 会抛 CookieConflict。直接解析原始
+        # Set-Cookie 行，保留最后一个非空值。
+        self._absorb_cookie_lines(response.headers.get_list("set-cookie"))
 
     def _absorb_cookie_lines(self, lines: list[str]) -> None:
         """吸收原始 Set-Cookie 行，保留最后一个非空值。"""

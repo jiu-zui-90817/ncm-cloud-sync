@@ -275,3 +275,21 @@ def test_absorb_set_cookie() -> None:
     client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
     client._weapi("/weapi/test", {})
     assert client.cookies["MUSIC_U"] == "new"
+
+
+def test_absorb_cookies_handles_same_name_on_different_paths() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"code": 803},
+            headers=[
+                ("set-cookie", "MUSIC_A_T=old; Path=/eapi/feedback"),
+                ("set-cookie", "MUSIC_A_T=new; Path=/api/feedback"),
+                ("set-cookie", "MUSIC_U=final; Path=/; Domain=.music.163.com"),
+            ],
+        )
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    assert client.qr_status("key")["code"] == 803
+    assert client.cookies["MUSIC_A_T"] == "new"
+    assert client.cookies["MUSIC_U"] == "final"
