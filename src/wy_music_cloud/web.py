@@ -53,6 +53,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "version": 1,
     "music_dirs": [],
     "interval": 3600,
+    "rate_limit": 1.0,
     "dry_run": False,
     "log_level": "INFO",
 }
@@ -76,6 +77,16 @@ def _as_int(value: Any, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError) as exc:
         raise ValueError("必须是整数") from exc
     if number < minimum or number > maximum:
+        raise ValueError(f"必须在 {minimum} 到 {maximum} 之间")
+    return number
+
+
+def _as_float(value: Any, default: float, minimum: float, maximum: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("必须是数字") from exc
+    if not (minimum <= number <= maximum):
         raise ValueError(f"必须在 {minimum} 到 {maximum} 之间")
     return number
 
@@ -190,6 +201,10 @@ class SettingsStore:
             data["interval"] = _as_int(raw.get("interval", data["interval"]), 3600, 60, 86400)
         except ValueError:
             data["interval"] = 3600
+        try:
+            data["rate_limit"] = _as_float(raw.get("rate_limit", data["rate_limit"]), 1.0, 0.0, 10.0)
+        except ValueError:
+            data["rate_limit"] = 1.0
         data["dry_run"] = _as_bool(raw.get("dry_run"), False)
         level = str(raw.get("log_level") or data["log_level"]).upper()
         data["log_level"] = level if level in ALLOWED_LOG_LEVELS else "INFO"
@@ -199,6 +214,7 @@ class SettingsStore:
         data = dict(DEFAULT_SETTINGS)
         data["music_dirs"] = normalize_music_dirs(payload.get("music_dirs") or [])
         data["interval"] = _as_int(payload.get("interval", 3600), 3600, 60, 86400)
+        data["rate_limit"] = _as_float(payload.get("rate_limit", 1.0), 1.0, 0.0, 10.0)
         data["dry_run"] = _as_bool(payload.get("dry_run"), False)
         level = str(payload.get("log_level") or "INFO").upper()
         if level not in ALLOWED_LOG_LEVELS:
@@ -220,6 +236,7 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
     if dirs:
         config.music_dirs = [Path(str(item)).expanduser() for item in dirs]
     config.interval = int(settings.get("interval", config.interval))
+    config.rate_limit = float(settings.get("rate_limit", config.rate_limit))
     config.dry_run = bool(settings.get("dry_run", config.dry_run))
     level = str(settings.get("log_level") or config.log_level).upper()
     if level in ALLOWED_LOG_LEVELS:
@@ -237,6 +254,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
             candidates = [DEFAULT_MUSIC_DIR]
         settings["music_dirs"] = candidates
     settings["interval"] = config.interval
+    settings["rate_limit"] = config.rate_limit
     settings["dry_run"] = config.dry_run
     settings["log_level"] = config.log_level
     return settings
@@ -427,7 +445,12 @@ class SyncManager:
         with self._lock:
             apply_settings(self.config, settings)
         self._wake.set()
-        logger.info("同步设置已更新，间隔 %s 秒，dry_run=%s", self.config.interval, self.config.dry_run)
+        logger.info(
+            "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，dry_run=%s",
+            self.config.interval,
+            self.config.rate_limit,
+            self.config.dry_run,
+        )
 
     def trigger(self, *, dry_run: bool = False, force: bool = False, source: str = "manual") -> bool:
         if not self.sessions.has_session():
@@ -775,6 +798,7 @@ class WebApp:
             "settings": settings,
             "music_dirs": [str(path) for path in self.config.music_dirs],
             "interval": self.config.interval,
+            "rate_limit": self.config.rate_limit,
             "dry_run": self.config.dry_run,
             "log_level": self.config.log_level,
             "settings_path": str(self.settings.path),

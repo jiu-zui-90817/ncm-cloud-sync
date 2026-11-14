@@ -146,6 +146,7 @@
     var settings = status.settings || {};
     el("musicDirs").value = (settings.music_dirs || []).join("\n");
     el("interval").value = settings.interval || 3600;
+    el("rateLimit").value = settings.rate_limit != null ? settings.rate_limit : 1;
     el("dryRun").checked = Boolean(settings.dry_run);
     el("logLevel").value = settings.log_level || "INFO";
     el("intervalLabel").textContent = formatInterval(settings.interval || status.config.interval);
@@ -157,16 +158,25 @@
       el("lastRun").textContent = "尚未运行";
     } else {
       var stats = last.stats || {};
-      el("lastRun").textContent = formatDate(last.at) + " · 上传 " + (stats.uploaded || 0) +
+      var text = formatDate(last.at) + " · 上传 " + (stats.uploaded || 0) +
         " · 跳过 " + (stats.skipped || 0) + " · 失败 " + (stats.failed || 0);
+      if (stats.permission_denied) {
+        text += "（无权限 " + stats.permission_denied + "）";
+      }
+      if (stats.deferred) {
+        text += " · 待续 " + stats.deferred;
+      }
+      el("lastRun").textContent = text;
     }
     el("nextRun").textContent = sync.next_run_at ? formatDate(sync.next_run_at) : "-";
     el("syncState").textContent = sync.running ? "同步中" : "空闲";
     el("syncState").className = "tag" + (sync.running ? " active" : "");
     el("syncButton").disabled = Boolean(sync.running);
     el("dryRunButton").disabled = Boolean(sync.running);
-    if (sync.error) {
-      el("syncError").textContent = sync.error;
+    var lastStats = (sync.last_run && sync.last_run.stats) || {};
+    var syncError = sync.error || lastStats.error || (sync.last_run && sync.last_run.error);
+    if (syncError) {
+      el("syncError").textContent = syncError;
       el("syncError").classList.remove("hidden");
     } else {
       el("syncError").classList.add("hidden");
@@ -191,9 +201,11 @@
       ? "用户 ID " + data.account.userId
       : "账号信息将在下一次刷新时更新";
     var stats = data.stats || {};
+    var lastStats = (data.sync && data.sync.last_run && data.sync.last_run.stats) || {};
     el("statUploaded").textContent = stats.uploaded || 0;
     el("statPending").textContent = stats.pending || 0;
     el("statFailed").textContent = stats.failed || 0;
+    el("statPermission").textContent = lastStats.permission_denied || 0;
     el("statMissing").textContent = stats.missing || 0;
     el("statSkipped").textContent = stats.skipped || 0;
     el("syncHint").textContent = data.sync.running
@@ -405,6 +417,7 @@
     var payload = {
       music_dirs: dirs,
       interval: Number(el("interval").value),
+      rate_limit: Number(el("rateLimit").value),
       dry_run: el("dryRun").checked,
       log_level: el("logLevel").value
     };

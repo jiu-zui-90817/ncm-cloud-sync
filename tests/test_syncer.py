@@ -6,7 +6,7 @@ import pytest
 
 from wy_music_cloud.client import UploadResult
 from wy_music_cloud.config import Config
-from wy_music_cloud.errors import UploadError
+from wy_music_cloud.errors import RateLimitError, UploadError
 from wy_music_cloud.state import StateStore
 from wy_music_cloud.syncer import Syncer
 
@@ -155,3 +155,40 @@ def test_limit(tmp_path: Path) -> None:
         stats = Syncer(config, client, state, limit=1).run_once()
         assert stats.scanned == 1
         assert len(client.calls) == 1
+
+
+def test_rate_limit_aborts_run(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    for name in ("a.mp3", "b.mp3", "c.mp3"):
+        (music / name).write_bytes(name.encode())
+    config = make_config(tmp_path, music)
+    client = FakeClient({"a.mp3": RateLimitError("操作频繁，请稍候再试", code=405)})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.aborted is True
+        assert stats.failed == 0
+        assert stats.deferred == 3
+        assert "405" in stats.error
+        assert state.get(music / "a.mp3").status == "pending"
+        assert len(client.calls) == 1
+
+
+def test_permission_error_is_counted(tmp_path: Path, monkeypatch) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a")
+    config = make_config(tmp_path, music)
+
+    def denied(path):
+        raise PermissionError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr("wy_music_cloud.syncer.file_md5", denied)
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        record = state.get(target)
+        assert stats.failed == 1
+        assert stats.permission_denied == 1
+        assert record is not None and record.status == "failed"
+        assert "没有读取权限" in (record.last_error or "")

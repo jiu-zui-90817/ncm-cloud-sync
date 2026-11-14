@@ -128,6 +128,7 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
         body={
             "music_dirs": [str(music)],
             "interval": 300,
+            "rate_limit": 2.5,
             "dry_run": True,
             "log_level": "DEBUG",
         },
@@ -136,9 +137,11 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert data["ok"] is True
     assert app.config.music_dirs == [music]
     assert app.config.interval == 300
+    assert app.config.rate_limit == 2.5
     assert app.config.dry_run is True
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["music_dirs"] == [str(music)]
+    assert saved["rate_limit"] == 2.5
     assert saved["log_level"] == "DEBUG"
 
 
@@ -346,3 +349,5 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert "forceRecheck" in html
     assert "loginDiagnosticsButton" in html
     assert "copyDiagnosticsButton" in html
+    assert "statPermission" in html
+    assert "rateLimit" in html

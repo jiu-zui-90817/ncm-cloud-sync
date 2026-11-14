@@ -13,7 +13,7 @@ from Crypto.Cipher import AES
 import wy_music_cloud.client as client_module
 from wy_music_cloud.crypto import EAPI_KEY
 from wy_music_cloud.client import CloudClient, NOS_BUCKET
-from wy_music_cloud.errors import ApiError, AuthError
+from wy_music_cloud.errors import ApiError, AuthError, RateLimitError
 
 
 def make_client(**kwargs) -> CloudClient:
@@ -322,3 +322,29 @@ def test_absorb_cookies_handles_same_name_on_different_paths() -> None:
     assert client.qr_status("key")["code"] == 803
     assert client.cookies["MUSIC_A_T"] == "new"
     assert client.cookies["MUSIC_U"] == "final"
+
+
+def test_rate_limit_code_raises_specific_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 405, "message": "操作频繁，请稍候再试"})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0, rate_limit=0)
+    with pytest.raises(RateLimitError) as info:
+        client._weapi("/weapi/nos/token/alloc", {})
+    assert info.value.code == 405
+    assert "操作频繁" in str(info.value)
+
+
+def test_post_json_throttles_requests(monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 200})
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(client_module.time, "sleep", lambda seconds: sleeps.append(seconds))
+    client = CloudClient(
+        {}, transport=httpx.MockTransport(handler), retries=0, rate_limit=0.2
+    )
+    client._weapi("/weapi/test", {})
+    client._weapi("/weapi/test", {})
+    assert sleeps, "第二次请求应等待请求间隔"
+    assert all(seconds > 0 for seconds in sleeps)

@@ -27,6 +27,10 @@ class ApiError(WyMusicError):
         super().__init__(detail)
 
 
+class RateLimitError(ApiError):
+    """网易云接口限流（405/429），稍后重试即可。"""
+
+
 class UploadError(WyMusicError):
     """上传过程中的网络或协议错误。"""
 

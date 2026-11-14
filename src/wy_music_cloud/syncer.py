@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from .client import CloudClient, UploadResult
 from .config import Config
-from .errors import AuthError
+from .errors import AuthError, RateLimitError
 from .hashing import file_md5
 from .scanner import AudioFile, scan
 from .state import StateStore
@@ -29,11 +29,14 @@ class SyncStats:
     skipped_remote: int = 0
     planned: int = 0
     failed: int = 0
+    permission_denied: int = 0
+    deferred: int = 0
     ignored: int = 0
     missing: int = 0
     bytes_uploaded: int = 0
     duration: float = 0.0
     aborted: bool = False
+    error: str = ""
 
     @property
     def skipped(self) -> int:
@@ -49,9 +52,12 @@ class SyncStats:
             f"扫描 {self.scanned}，上传 {self.uploaded}，"
             f"已存在/跳过 {self.skipped}（本地重复 {self.skipped_local}，"
             f"云端已有 {self.skipped_remote}，未变更 {self.up_to_date}），"
-            f"失败 {self.failed}，缺失 {self.missing}，"
+            f"失败 {self.failed}"
+            + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
+            + f"，缺失 {self.missing}，"
             f"上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
+            + (f"；已暂停，剩余 {self.deferred} 首待下次" if self.deferred else "")
         )
 
 
@@ -118,6 +124,32 @@ class Syncer:
                 except AuthError:
                     stats.aborted = True
                     raise
+                except RateLimitError as exc:
+                    stats.aborted = True
+                    stats.deferred = max(0, len(files) - processed + 1)
+                    stats.error = f"网易云限流：{exc}。本次同步已暂停，稍后会自动继续。"
+                    logger.warning("触发网易云限流，本次同步暂停: %s", exc)
+                    if not self.dry_run:
+                        try:
+                            self.state.mark_pending(audio.path, str(exc))
+                        except Exception:
+                            logger.exception("写入待处理状态时出错: %s", audio.path)
+                    break
+                except PermissionError as exc:
+                    stats.failed += 1
+                    stats.permission_denied += 1
+                    logger.warning(
+                        "没有读取权限，跳过: %s（请给应用用户 wy-music-cloud 授予该目录读取权限）",
+                        audio.path,
+                    )
+                    if not self.dry_run:
+                        try:
+                            self.state.mark_failed(
+                                audio.path,
+                                "没有读取权限，请在应用中心授权该目录，或给应用用户 wy-music-cloud 读权限",
+                            )
+                        except Exception:
+                            logger.exception("写入失败状态时出错: %s", audio.path)
                 except Exception as exc:
                     stats.failed += 1
                     logger.exception("处理文件失败: %s", audio.path)
@@ -145,6 +177,7 @@ class Syncer:
             uploaded=stats.uploaded,
             skipped=stats.skipped,
             failed=stats.failed,
+            error=stats.error or None,
         )
         self._notify("done", stats.as_dict())
         logger.info("同步完成: %s", stats.summary())

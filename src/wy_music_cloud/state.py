@@ -226,6 +226,13 @@ class StateStore:
         )
         self.conn.commit()
 
+    def mark_pending(self, path: str | Path, reason: str = "") -> None:
+        self.conn.execute(
+            "UPDATE files SET status = 'pending', last_error = ?, updated_at = ? WHERE path = ?",
+            (reason[:2000], utc_now(), str(path)),
+        )
+        self.conn.commit()
+
     def mark_failed(self, path: str | Path, error: str) -> None:
         self.conn.execute(
             "UPDATE files SET status = 'failed', last_error = ?, updated_at = ? WHERE path = ?",

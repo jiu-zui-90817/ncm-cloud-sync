@@ -11,6 +11,7 @@ import hashlib
 import logging
 import secrets
 import string
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,7 +22,7 @@ import httpx
 
 from .cookies import cookie_header, ensure_defaults
 from .crypto import anonymous_username, encrypt_eapi, encrypt_weapi
-from .errors import ApiError, AuthError, UploadError
+from .errors import ApiError, AuthError, RateLimitError, UploadError
 from .hashing import file_md5
 from .metadata import display_album, display_artist, read_tags, sanitize_filename
 
@@ -80,7 +81,7 @@ class CloudClient:
         *,
         timeout: float = 30.0,
         retries: int = 3,
-        rate_limit: float = 0.5,
+        rate_limit: float = 1.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.cookies = ensure_defaults(dict(cookies))
@@ -89,6 +90,8 @@ class CloudClient:
         self._nos_host: str | None = None
         self._nos_host_at = 0.0
         self._device_ip: str | None = None
+        self._throttle_lock = threading.Lock()
+        self._last_request_at = 0.0
         self._http = httpx.Client(
             timeout=timeout,
             transport=transport,
@@ -130,10 +133,25 @@ class CloudClient:
             raise AuthError(
                 f"登录状态无效（code={code}），请重新登录或更新 MUSIC_U"
             )
+        if code_int in {405, 429}:
+            message = body.get("msg") or body.get("message") or "操作频繁"
+            raise RateLimitError(str(message), code=code, url=url)
         if code_int not in {200, -1}:
             message = body.get("msg") or body.get("message") or "接口调用失败"
             raise ApiError(str(message), code=code, url=url)
         return body
+
+    def _throttle(self) -> None:
+        """让所有 weapi 请求共享一个最小间隔，避免短时间内触发风控。"""
+        if self.rate_limit <= 0:
+            return
+        with self._throttle_lock:
+            now = time.monotonic()
+            wait = self.rate_limit - (now - self._last_request_at)
+            if wait > 0:
+                time.sleep(wait)
+                now = time.monotonic()
+            self._last_request_at = now
 
     def _post_json(
         self,
@@ -150,6 +168,7 @@ class CloudClient:
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
+                self._throttle()
                 response = self._http.post(url, data=data, headers=merged)
                 self._absorb_cookies(response)
                 if cookie_sink is not None:
@@ -584,6 +603,4 @@ class CloudClient:
             resource_id=str(resource.get("resourceId", "")),
         )
         self.publish(song_id)
-        if self.rate_limit:
-            time.sleep(self.rate_limit)
         return UploadResult(True, song_id=song_id, reason="uploaded", cloud_name=name)
