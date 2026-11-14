@@ -5,6 +5,7 @@ import json
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from wy_music_cloud.config import Config
 from wy_music_cloud.session import load_session
@@ -166,7 +167,13 @@ def test_login_flow_uses_official_qr_url(tmp_path: Path, monkeypatch: Any) -> No
     )
     result = app.login.start()
     try:
-        assert result["qr_url"] == "https://music.163.com/login?codekey=testkey"
+        parsed = urlparse(result["qr_url"])
+        query = parse_qs(parsed.query)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "music.163.com"
+        assert query["codekey"] == ["testkey"]
+        assert query["chainId"][0].startswith("v1_")
+        assert "_web_login_" in query["chainId"][0]
         assert "music.y.163.com" not in result["qr_url"]
     finally:
         app.login.close()
@@ -198,3 +205,74 @@ def test_login_flow_saves_cookies(tmp_path: Path) -> None:
     assert cookies["MUSIC_U"] == "token"
     assert cookies["os"] == "pc"
     assert profile["nickname"] == "tester"
+
+
+def test_login_flow_accepts_singular_cookie(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.cookies: dict[str, str] = {}
+
+        def qr_status(self, key: str) -> dict[str, Any]:
+            return {"code": 803, "cookie": "MUSIC_U=singular; __csrf=csrf"}
+
+        def login_status(self) -> dict[str, Any]:
+            return {"nickname": "tester", "userId": 42}
+
+        def close(self) -> None:
+            pass
+
+    app.login._client = FakeClient()
+    app.login._key = "key"
+    app.login._created = time.monotonic()
+    result = app.login.poll("key")
+    assert result["logged_in"] is True
+    cookies, _ = load_session(app.config.session_path)
+    assert cookies["MUSIC_U"] == "singular"
+    assert cookies["__csrf"] == "csrf"
+    assert cookies["os"] == "pc"
+
+
+def test_login_flow_verification_required_keeps_session(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.cookies: dict[str, str] = {}
+
+        def qr_status(self, key: str) -> dict[str, Any]:
+            return {"code": 8821, "message": "需要安全验证"}
+
+        def close(self) -> None:
+            pass
+
+    app.login._client = FakeClient()
+    app.login._key = "key"
+    app.login._created = time.monotonic()
+    result = app.login.poll("key")
+    assert result["code"] == 8821
+    assert result["verification_required"] is True
+    assert app.login._client is not None
+    assert not app.config.session_path.exists()
+
+
+def test_qr_poll_malformed_body_returns_401(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.cookies: dict[str, str] = {}
+
+        def qr_status(self, key: str) -> Any:
+            return None
+
+        def close(self) -> None:
+            pass
+
+    app.login._client = FakeClient()
+    app.login._key = "key"
+    app.login._created = time.monotonic()
+    status, _, data = call(app, "/api/qr/status", query="key=key")
+    assert status == "401 Unauthorized"
+    assert "异常" in data["error"]

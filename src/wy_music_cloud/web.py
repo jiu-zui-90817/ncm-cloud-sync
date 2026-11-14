@@ -23,9 +23,9 @@ else:  # wsgiref.types 只在 Python 3.11+ 存在
 from . import __version__
 from .client import CloudClient
 from .config import Config
-from .cookies import ensure_defaults, parse_cookie
+from .cookies import ensure_defaults
 from .errors import ApiError, AuthError, ConfigError, UploadError, WyMusicError
-from .login import QR_LOGIN_URL
+from .login import apply_qr_cookies, build_qr_url
 from .session import load_session, save_session
 from .state import StateStore
 from .syncer import SyncStats, Syncer
@@ -282,7 +282,7 @@ class LoginFlow:
                 rate_limit=0,
             )
             key = client.qr_unikey()
-            url = QR_LOGIN_URL.format(key=key)
+            url = build_qr_url(key)
             svg = make_qr_svg(url)
             self._client = client
             self._key = key
@@ -302,25 +302,29 @@ class LoginFlow:
                 self._close_locked()
                 return {"code": 800, "message": "二维码已过期，请刷新"}
             body = self._client.qr_status(self._key)
-            code = int(body.get("code", -1))
+            if not isinstance(body, dict):
+                raise AuthError("扫码状态返回异常，请刷新二维码重试")
+            try:
+                code = int(body.get("code", -1))
+            except (TypeError, ValueError):
+                code = -1
             if code == 803:
-                raw = body.get("cookies")
-                if isinstance(raw, list):
-                    cookies = {
-                        str(item.get("name")): str(item.get("value"))
-                        for item in raw
-                        if isinstance(item, dict) and item.get("name") and item.get("value")
-                    }
-                else:
-                    cookies = parse_cookie(raw)
-                cookies = ensure_defaults(cookies)
-                if "MUSIC_U" not in cookies:
+                if not apply_qr_cookies(self._client, body):
                     raise AuthError("扫码成功但未拿到 MUSIC_U，请重试")
-                self._client.cookies.update(cookies)
-                profile = self._client.login_status()
-                self.sessions.save(self._client.cookies, profile)
+                self._client.cookies = ensure_defaults(dict(self._client.cookies))
+                try:
+                    profile = self._client.login_status()
+                    self.sessions.save(self._client.cookies, profile)
+                except OSError as exc:
+                    raise ConfigError(f"保存登录状态失败：{exc}") from exc
                 self._close_locked()
                 return {"code": 803, "logged_in": True, "profile": profile, "message": "登录成功"}
+            if code == 8821:
+                return {
+                    "code": 8821,
+                    "verification_required": True,
+                    "message": "需要在手机上完成安全验证，请按手机提示操作",
+                }
             if code == 802:
                 return {"code": 802, "message": "已扫码，请在手机上确认"}
             if code == 800:

@@ -177,7 +177,10 @@ class CloudClient:
         return self._post_json(
             url,
             form,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": BASE_URL,
+            },
             check=check,
         )
 
@@ -205,7 +208,9 @@ class CloudClient:
 
     # -- 扫码 / 手机号登录 ------------------------------------------------
     def qr_unikey(self) -> str:
-        body = self._weapi("/weapi/login/qrcode/unikey", {"type": 1})
+        body = self._weapi(
+            "/weapi/login/qrcode/unikey", {"type": 1, "noCheckToken": True}
+        )
         key = body.get("unikey")
         if not key:
             raise AuthError(f"获取二维码 key 失败: {body}")
@@ -215,7 +220,7 @@ class CloudClient:
         # 800/801/802/803 都是正常状态，不走统一的 code==200 校验。
         return self._weapi(
             "/weapi/login/qrcode/client/login",
-            {"key": key, "type": 1},
+            {"key": key, "type": 1, "noCheckToken": True},
             check=False,
         )
 

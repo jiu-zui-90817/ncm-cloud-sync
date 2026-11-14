@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import wy_music_cloud.login as login
+from urllib.parse import parse_qs, urlparse
 from wy_music_cloud.errors import AuthError
 
 
@@ -44,6 +45,47 @@ def test_qr_login_expired(monkeypatch) -> None:
 
     with pytest.raises(AuthError):
         login.qr_login(Expired(), qr_path=None, output=lambda _: None)
+
+
+def test_build_qr_url_has_chain_id() -> None:
+    url = login.build_qr_url("abc", "v1_TEST_web_login_1")
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    assert parsed.netloc == "music.163.com"
+    assert query["codekey"] == ["abc"]
+    assert query["chainId"] == ["v1_TEST_web_login_1"]
+
+
+def test_qr_login_accepts_singular_cookie(monkeypatch) -> None:
+    pytest.importorskip("qrcode")
+    monkeypatch.setattr(login.time, "sleep", lambda _: None)
+
+    class Singular(FakeClient):
+        def qr_status(self, key: str):
+            return {"code": 803, "cookie": "MUSIC_U=abc; __csrf=csrf"}
+
+    cookies, _ = login.qr_login(Singular(), qr_path=None, output=lambda _: None)
+    assert cookies["MUSIC_U"] == "abc"
+    assert cookies["__csrf"] == "csrf"
+
+
+def test_qr_login_handles_security_verification(monkeypatch) -> None:
+    pytest.importorskip("qrcode")
+    monkeypatch.setattr(login.time, "sleep", lambda _: None)
+    messages: list[str] = []
+
+    class VerifyThenOk(FakeClient):
+        def qr_status(self, key: str):
+            self.calls += 1
+            if self.calls == 1:
+                return {"code": 8821}
+            return {"code": 803, "cookie": "MUSIC_U=abc"}
+
+    cookies, _ = login.qr_login(
+        VerifyThenOk(), qr_path=None, output=messages.append
+    )
+    assert cookies["MUSIC_U"] == "abc"
+    assert any("安全验证" in message for message in messages)
 
 
 def test_phone_login(monkeypatch) -> None:

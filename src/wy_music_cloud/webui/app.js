@@ -37,7 +37,9 @@
       }).then(function (data) {
         if (!response.ok) {
           var message = data && data.error ? data.error : "请求失败（HTTP " + response.status + "）";
-          throw new Error(message);
+          var error = new Error(message);
+          error.status = response.status;
+          throw error;
         }
         return data;
       });
@@ -255,6 +257,12 @@
       }
     }).catch(function (error) {
       el("qrStatus").textContent = error.message;
+      if (error.status === 401) {
+        stopQrPolling();
+        state.qrKey = "";
+        el("qrImage").textContent = "";
+        el("qrPlaceholder").classList.remove("hidden");
+      }
     });
   }
 
