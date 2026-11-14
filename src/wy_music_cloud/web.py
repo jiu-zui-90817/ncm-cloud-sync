@@ -25,6 +25,7 @@ from .client import CloudClient
 from .config import Config
 from .cookies import ensure_defaults, parse_cookie
 from .errors import ApiError, AuthError, ConfigError, UploadError, WyMusicError
+from .login import QR_LOGIN_URL
 from .session import load_session, save_session
 from .state import StateStore
 from .syncer import SyncStats, Syncer
@@ -281,7 +282,7 @@ class LoginFlow:
                 rate_limit=0,
             )
             key = client.qr_unikey()
-            url = f"https://music.y.163.com/login?codekey={key}"
+            url = QR_LOGIN_URL.format(key=key)
             svg = make_qr_svg(url)
             self._client = client
             self._key = key

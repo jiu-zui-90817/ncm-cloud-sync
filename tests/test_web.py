@@ -159,6 +159,19 @@ def test_qr_svg_contains_path() -> None:
     assert "<path" in svg
 
 
+def test_login_flow_uses_official_qr_url(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setattr(
+        "wy_music_cloud.web.CloudClient.qr_unikey", lambda self: "testkey"
+    )
+    result = app.login.start()
+    try:
+        assert result["qr_url"] == "https://music.163.com/login?codekey=testkey"
+        assert "music.y.163.com" not in result["qr_url"]
+    finally:
+        app.login.close()
+
+
 def test_login_flow_saves_cookies(tmp_path: Path) -> None:
     app = make_app(tmp_path)
 
