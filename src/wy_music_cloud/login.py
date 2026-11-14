@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -12,18 +11,12 @@ from .client import CloudClient
 from .cookies import parse_cookie
 from .errors import AuthError
 
-QR_LOGIN_URL = "https://music.163.com/login?codekey={key}&chainId={chain_id}"
+# 与网易云网页端当前实现一致：只需 codekey，不需要 chainId。
+QR_LOGIN_URL = "https://music.163.com/login"
 
 
-def make_chain_id() -> str:
-    """网易云新版扫码登录要求的 chainId，格式与网页端一致。"""
-    return f"v1_{secrets.token_hex(26).upper()}_web_login_{int(time.time() * 1000)}"
-
-
-def build_qr_url(key: str, chain_id: str | None = None) -> str:
-    return "https://music.163.com/login?" + urlencode(
-        {"codekey": key, "chainId": chain_id or make_chain_id()}
-    )
+def build_qr_url(key: str) -> str:
+    return QR_LOGIN_URL + "?" + urlencode({"codekey": key})
 
 
 def _merge_cookie_payload(target: dict[str, str], raw: Any) -> None:

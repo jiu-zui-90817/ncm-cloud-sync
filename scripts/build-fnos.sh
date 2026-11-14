@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/deploy/fnos/wy-music-cloud"
+VERSION="$(sed -n 's/^version=//p' "$APP/manifest" | head -n 1)"
+if [ -z "$VERSION" ]; then
+  echo "无法从 manifest 读取版本号。" >&2
+  exit 1
+fi
 SERVER="$APP/app/server"
 DIST="$ROOT/dist"
 WHEEL_ROOT="$ROOT/.wheels/native"
@@ -20,7 +25,7 @@ if [ -f "$ROOT/.pipfix/run_pip.py" ]; then
 fi
 
 rm -rf "$TMP_ROOT" "$SERVER"
-rm -f "$DIST/wy-music-cloud.fpk" "$ROOT"/*.fpk "$APP"/*.fpk
+rm -f "$DIST"/wy-music-cloud*.fpk "$ROOT"/*.fpk "$APP"/*.fpk
 mkdir -p "$TMP_ROOT" "$DIST" "$SERVER/vendor" "$APP/app/ui/images"
 chmod 777 "$TMP_ROOT"
 if command -v cygpath >/dev/null 2>&1; then
@@ -85,7 +90,10 @@ for FPK in "$APP"/*.fpk "$ROOT"/*.fpk; do
 done
 shopt -u nullglob
 
-FPK_FILE="$DIST/wy-music-cloud.fpk"
+FPK_FILE="$DIST/wy-music-cloud-$VERSION.fpk"
+if [ -f "$DIST/wy-music-cloud.fpk" ] && [ "$DIST/wy-music-cloud.fpk" != "$FPK_FILE" ]; then
+  mv "$DIST/wy-music-cloud.fpk" "$FPK_FILE"
+fi
 if [ ! -f "$FPK_FILE" ]; then
   echo "fnpack 没有生成 $FPK_FILE，请检查上方错误。" >&2
   exit 1
@@ -93,5 +101,5 @@ fi
 
 "$PYTHON_BIN" "$ROOT/scripts/fix-fpk-modes.py" "$FPK_FILE"
 
-echo "构建完成：$FPK_FILE"
+echo "构建完成：$FPK_FILE（版本 $VERSION）"
 ls -lh "$FPK_FILE"

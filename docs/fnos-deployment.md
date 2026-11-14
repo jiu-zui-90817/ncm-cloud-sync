@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的 `wy-music-cloud.fpk`。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.4.fpk`）。
 
 自行构建：
 
@@ -25,7 +25,7 @@ cd wy-music-cloud
 bash scripts/build-fnos.sh
 ```
 
-产物为 `dist/wy-music-cloud.fpk`。构建机需要网络下载 wheel；NAS 运行时不需要。
+产物为 `dist/wy-music-cloud-<版本>.fpk`。构建机需要网络下载 wheel；NAS 运行时不需要。
 
 ### 3. 安装
 
@@ -141,7 +141,7 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **应用启动失败**
 
-查看 `app.log`。常见原因：
+优先在页面日志卡片点“查看诊断”，那里会显示真实的 `app.log` 路径和内存日志。常见原因：
 
 - 官方 `python312` 依赖没有装好：重新安装应用或先安装依赖；
 - CPU 架构不匹配：确认 NAS 是 x86_64 或 aarch64；
@@ -167,15 +167,19 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **登录失效**
 
-重新扫码。若提示接口错误，可能是网易云接口变动，查看 [docs/PROTOCOL.md](PROTOCOL.md) 和项目 issue。
+重新扫码；扫码失败时用登录卡片的 Cookie 登录兜底。若提示接口错误，可能是网易云接口变动，查看 [docs/PROTOCOL.md](PROTOCOL.md) 和项目 issue。
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-0.2.1 及更早版本的二维码使用了无法解析的 `music.y.163.com`；0.2.2 修正域名后仍缺少新版协议要求的 `chainId` 和 `noCheckToken`。升级到 **0.2.3**，停止并重新启动应用后重新生成二维码。若手机提示“需要在手机上完成安全验证”，按手机提示操作，页面会自动继续。
+0.2.4 起改用网易云官方网页端扫码接口（`/api/login/qrcode/unikey` 和 `/api/login/qrcode/client/login`），二维码只带 `codekey`，不再使用 `chainId` / `noCheckToken`。0.2.2 的旧接口和 0.2.3 的任意 `chainId` 都可能让手机端报“数据加载失败”。升级到 **0.2.4**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败，展开“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+
+**没有日志文件 / 日志是空的**
+
+0.2.4 起服务端带内存日志缓冲。打开页面底部日志卡片，点“查看诊断”，会列出真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使 `app.log` 因权限没写成，也能看到内存日志。反馈问题时复制整段诊断内容即可。
 
 **同步失败**
 
-日志会记录具体文件与错误。常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
+日志会记录具体文件与错误。页面底部日志卡片点“查看诊断”，会显示真实的 `app.log` 路径、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使日志文件因权限没写成，内置日志缓冲仍可查看。常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
 
 ## 二、Docker（可选）
 

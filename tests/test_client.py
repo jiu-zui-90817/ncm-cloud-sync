@@ -186,6 +186,38 @@ def test_nos_upload_url_and_headers(tmp_path: Path, monkeypatch) -> None:
     assert captured["headers"]["Content-MD5"] == "md5"
 
 
+def test_qr_unikey_uses_plain_official_api() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_post(url, payload=None, **kwargs):
+        calls.append((url, payload, kwargs))
+        return {"code": 200, "unikey": "key"}
+
+    client._post_json = fake_post  # type: ignore[method-assign]
+    assert client.qr_unikey() == "key"
+    url, payload, _kwargs = calls[0]
+    assert url == client_module.BASE_URL + "/api/login/qrcode/unikey"
+    assert payload == {"type": 1}
+    assert "noCheckToken" not in payload
+
+
+def test_qr_status_uses_plain_official_api() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_post(url, payload=None, **kwargs):
+        calls.append((url, payload, kwargs))
+        return {"code": 801, "message": "等待扫码"}
+
+    client._post_json = fake_post  # type: ignore[method-assign]
+    assert client.qr_status("key")["code"] == 801
+    url, payload, _kwargs = calls[0]
+    assert url == client_module.BASE_URL + "/api/login/qrcode/client/login"
+    assert payload == {"key": "key", "type": 1}
+    assert "noCheckToken" not in payload
+
+
 def test_login_status_requires_profile() -> None:
     client = make_client()
     client._weapi = lambda *a, **k: {"code": 200, "profile": None, "account": None}  # type: ignore[method-assign]

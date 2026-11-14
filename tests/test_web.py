@@ -171,9 +171,9 @@ def test_login_flow_uses_official_qr_url(tmp_path: Path, monkeypatch: Any) -> No
         query = parse_qs(parsed.query)
         assert parsed.scheme == "https"
         assert parsed.netloc == "music.163.com"
+        assert parsed.path == "/login"
         assert query["codekey"] == ["testkey"]
-        assert query["chainId"][0].startswith("v1_")
-        assert "_web_login_" in query["chainId"][0]
+        assert "chainId" not in query
         assert "music.y.163.com" not in result["qr_url"]
     finally:
         app.login.close()
@@ -276,3 +276,68 @@ def test_qr_poll_malformed_body_returns_401(tmp_path: Path) -> None:
     status, _, data = call(app, "/api/qr/status", query="key=key")
     assert status == "401 Unauthorized"
     assert "异常" in data["error"]
+
+
+def test_cookie_login_saves_session(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+
+    class FakeClient:
+        def __init__(self, cookies, **_kwargs) -> None:
+            self.cookies = dict(cookies)
+
+        def login_status(self) -> dict[str, Any]:
+            return {"nickname": "cookie user", "userId": 7}
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("wy_music_cloud.web.CloudClient", FakeClient)
+    status, _, data = call(
+        app,
+        "/api/login/cookie",
+        method="POST",
+        body={"cookie": "MUSIC_U=token; __csrf=csrf"},
+    )
+    assert status == "200 OK"
+    assert data["logged_in"] is True
+    cookies, profile = load_session(app.config.session_path)
+    assert cookies["MUSIC_U"] == "token"
+    assert cookies["os"] == "pc"
+    assert profile["userId"] == 7
+
+
+def test_cookie_login_requires_music_u(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, data = call(
+        app,
+        "/api/login/cookie",
+        method="POST",
+        body={"cookie": "__csrf=csrf"},
+    )
+    assert status == "401 Unauthorized"
+    assert "MUSIC_U" in data["error"]
+
+
+def test_diagnostics_and_log_paths(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, data = call(app, "/api/diagnostics")
+    assert status == "200 OK"
+    assert data["version"]
+    assert data["data_dir"] == str(app.config.data_dir)
+    assert data["log_paths"][0]["path"].endswith("app.log")
+    assert data["log_paths"][0]["exists"] is False
+    assert "TRIM_PKGVAR" in data["env"]
+    assert isinstance(data["logs"], str)
+
+    status, _, logs = call(app, "/api/logs")
+    assert status == "200 OK"
+    assert logs["log_paths"]
+    assert logs["log_exists"] is False
+
+
+def test_static_page_has_cookie_login(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, html = call(app, "/")
+    assert status == "200 OK"
+    assert "cookieInput" in html
+    assert "diagnosticsButton" in html

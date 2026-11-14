@@ -208,8 +208,14 @@ class CloudClient:
 
     # -- 扫码 / 手机号登录 ------------------------------------------------
     def qr_unikey(self) -> str:
-        body = self._weapi(
-            "/weapi/login/qrcode/unikey", {"type": 1, "noCheckToken": True}
+        # 官方网页端扫码接口：普通 form，不走 weapi，也不需要 chainId。
+        body = self._post_json(
+            BASE_URL + "/api/login/qrcode/unikey",
+            {"type": 1},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": BASE_URL,
+            },
         )
         key = body.get("unikey")
         if not key:
@@ -218,9 +224,13 @@ class CloudClient:
 
     def qr_status(self, key: str) -> dict[str, Any]:
         # 800/801/802/803 都是正常状态，不走统一的 code==200 校验。
-        return self._weapi(
-            "/weapi/login/qrcode/client/login",
-            {"key": key, "type": 1, "noCheckToken": True},
+        return self._post_json(
+            BASE_URL + "/api/login/qrcode/client/login",
+            {"key": key, "type": 1},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": BASE_URL,
+            },
             check=False,
         )
 

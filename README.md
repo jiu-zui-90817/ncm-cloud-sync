@@ -60,7 +60,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的 `wy-music-cloud.fpk`，打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.4.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -69,7 +69,7 @@ git clone https://github.com/jiu-zui-90817/wy-music-cloud.git
 cd wy-music-cloud
 # 需要 fnOS 官方 fnpack，放到 .tools/ 或加入 PATH
 bash scripts/build-fnos.sh
-# 产物：dist/wy-music-cloud.fpk
+# 产物：dist/wy-music-cloud-<版本>.fpk
 ```
 
 构建脚本会从 PyPI 下载 x86_64 / aarch64 的 cp312 离线 wheel，再调用 `fnpack` 打包；构建机需要网络，NAS 运行时不需要。
@@ -136,7 +136,11 @@ var/
 
 **页面打不开 / 502**
 
-先看应用是否已启动，再看数据目录的 `app.log`。首次启动需要等 Python 服务就绪，通常几秒。
+先看应用是否已启动。页面底部日志卡片点“查看诊断”，会显示真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket 和最近日志；即使日志文件因权限没写成，也能看到内存中的日志。首次启动需要等 Python 服务就绪，通常几秒。
+
+**没有日志文件 / 日志是空的**
+
+0.2.4 起服务端带内存日志缓冲。打开页面底部日志卡片，点“查看诊断”，会列出真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket 和最近 120 行日志；即使 `app.log` 因权限没写成，也能看到内存日志。反馈问题时复制整段诊断内容即可。
 
 **提示没有 python312**
 
@@ -144,11 +148,11 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-0.2.1 及更早版本的二维码使用了无法解析的 `music.y.163.com`；0.2.2 修正了域名，但缺少新版协议要求的 `chainId` 和 `noCheckToken`，扫码仍可能失败。升级到 **0.2.3** 后重新生成二维码即可。若手机提示“需要在手机上完成安全验证”，按手机提示操作，页面会自动继续轮询。
+0.2.4 起改用网易云官方网页端扫码接口（`/api/login/qrcode/unikey` 和 `/api/login/qrcode/client/login`），二维码只带 `codekey`，不再使用 `chainId` / `noCheckToken`。0.2.2 的旧接口和 0.2.3 的任意 `chainId` 都可能让手机端报“数据加载失败”。升级到 **0.2.4** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败，展开登录卡片里的“扫码失败？改用 Cookie 登录”，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
-确认手机上点了“确认登录”，并检查系统时间是否准确。二维码过期就重新生成。也可以退出登录后重试。
+确认手机上点了“确认登录”，并检查系统时间是否准确。二维码过期就重新生成。也可以退出登录后重试。若扫码一直失败，使用登录卡片里的 Cookie 登录兜底。
 
 **安装时提示“音乐目录不可用”**
 
@@ -160,7 +164,7 @@ var/
 
 **同步失败**
 
-看日志里的具体错误。常见原因是网络、Cookie 失效、云盘容量或接口变动。单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。常见原因是网络、Cookie 失效、云盘容量或接口变动。单个文件失败不会阻塞其他文件。
 
 **升级后设置还在吗**
 

@@ -543,6 +543,33 @@ textarea:focus {
   word-break: break-word;
 }
 
+.cookie-login {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+
+.cookie-login summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.cookie-login textarea {
+  margin: 10px 0;
+}
+
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#diagnosticsView {
+  margin-top: 12px;
+}
+
 .toast {
   position: fixed;
   left: 50%;

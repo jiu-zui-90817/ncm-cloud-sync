@@ -6,8 +6,10 @@ import json
 import logging
 import os
 import signal
+import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
@@ -23,7 +25,7 @@ else:  # wsgiref.types 只在 Python 3.11+ 存在
 from . import __version__
 from .client import CloudClient
 from .config import Config
-from .cookies import ensure_defaults
+from .cookies import ensure_defaults, parse_cookie
 from .errors import ApiError, AuthError, ConfigError, UploadError, WyMusicError
 from .login import apply_qr_cookies, build_qr_url
 from .session import load_session, save_session
@@ -31,6 +33,18 @@ from .state import StateStore
 from .syncer import SyncStats, Syncer
 
 logger = logging.getLogger(__name__)
+
+# 即使 app.log 因权限/路径问题看不到，也能从内存里取到最近日志。
+LOG_BUFFER: deque[str] = deque(maxlen=1000)
+
+
+class _RingBufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            LOG_BUFFER.append(self.format(record))
+        except Exception:  # pragma: no cover - 日志本身不能影响主流程
+            self.handleError(record)
+
 
 GATEWAY_PREFIX = "/app/wy-music-cloud"
 WEBUI_DIR = Path(__file__).with_name("webui")
@@ -149,6 +163,8 @@ def read_log_tail(paths: list[Path], lines: int = 200) -> str:
         text = raw.decode("utf-8", "replace")
         chunks.append(text[-128 * 1024 :])
     merged = "\n".join(chunk for chunk in chunks if chunk).splitlines()
+    if not merged:
+        merged = list(LOG_BUFFER)
     return "\n".join(merged[-lines:])
 
 
@@ -333,6 +349,35 @@ class LoginFlow:
             if code == 801:
                 return {"code": 801, "message": "等待扫码"}
             return {"code": code, "message": f"登录状态异常（code={code}）"}
+
+    def cookie_login(self, raw_cookie: str) -> dict[str, Any]:
+        text = str(raw_cookie or "").strip()
+        if not text:
+            raise AuthError("请粘贴包含 MUSIC_U 的网易云 Cookie")
+        try:
+            cookies = parse_cookie(text)
+        except ValueError as exc:
+            raise AuthError(f"Cookie 格式无法识别：{exc}") from exc
+        if not isinstance(cookies, dict) or not cookies.get("MUSIC_U"):
+            raise AuthError("Cookie 中缺少 MUSIC_U，请从已登录的 music.163.com 复制完整 Cookie")
+        client = CloudClient(
+            cookies,
+            timeout=self.config.timeout,
+            retries=self.config.retries,
+            rate_limit=0,
+        )
+        try:
+            profile = client.login_status()
+            client.cookies = ensure_defaults(dict(client.cookies))
+            try:
+                self.sessions.save(client.cookies, profile)
+            except OSError as exc:
+                raise ConfigError(f"保存登录状态失败：{exc}") from exc
+        finally:
+            client.close()
+        with self._lock:
+            self._close_locked()
+        return {"logged_in": True, "profile": profile, "message": "登录成功"}
 
     def close(self) -> None:
         with self._lock:
@@ -574,6 +619,15 @@ class WebApp:
                 return self._json(start_response, "200 OK", self._status())
             if path == "/api/qr" and method == "POST":
                 return self._json(start_response, "200 OK", self.login.start())
+            if path == "/api/login/cookie" and method == "POST":
+                body = self._body(environ)
+                return self._json(
+                    start_response,
+                    "200 OK",
+                    self.login.cookie_login(str(body.get("cookie") or "")),
+                )
+            if path == "/api/diagnostics" and method == "GET":
+                return self._json(start_response, "200 OK", self._diagnostics())
             if path == "/api/qr/status" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 key = (query.get("key") or [""])[0]
@@ -608,7 +662,15 @@ class WebApp:
             if path == "/api/logs" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 lines = _as_int((query.get("lines") or ["200"])[0], 200, 10, 1000)
-                return self._json(start_response, "200 OK", {"logs": read_log_tail(self.log_paths, lines)})
+                return self._json(
+                    start_response,
+                    "200 OK",
+                    {
+                        "logs": read_log_tail(self.log_paths, lines),
+                        "log_paths": [str(item) for item in self.log_paths],
+                        "log_exists": any(item.is_file() for item in self.log_paths),
+                    },
+                )
             if path == "/api/account/refresh" and method == "POST":
                 with self.sessions.client() as client:
                     profile = client.login_status()
@@ -671,6 +733,40 @@ class WebApp:
             "sync": self.sync.status(),
         }
 
+    def _diagnostics(self) -> dict[str, Any]:
+        def path_info(path: Path) -> dict[str, Any]:
+            entry: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+            if path.is_file():
+                try:
+                    entry["size"] = path.stat().st_size
+                except OSError:
+                    entry["size"] = None
+            return entry
+
+        return {
+            "version": __version__,
+            "data_dir": str(self.data_dir),
+            "settings_path": str(self.settings.path),
+            "log_paths": [path_info(item) for item in self.log_paths],
+            "pid": os.getpid(),
+            "python": sys.version.split()[0],
+            "executable": sys.executable,
+            "platform": sys.platform,
+            "cwd": os.getcwd(),
+            "socket": os.environ.get("WY_MUSIC_SOCKET", ""),
+            "env": {
+                key: os.environ.get(key, "")
+                for key in (
+                    "TRIM_APPDEST",
+                    "TRIM_PKGVAR",
+                    "WY_MUSIC_DATA_DIR",
+                    "WY_MUSIC_SETTINGS",
+                    "WY_MUSIC_LOG_FILE",
+                )
+            },
+            "logs": read_log_tail(self.log_paths, 120),
+        }
+
     def _settings_payload(self) -> dict[str, Any]:
         settings = self.settings.load()
         if not settings.get("music_dirs"):
@@ -729,12 +825,25 @@ class WebApp:
 
 
 def setup_logging(path: Path | None, level: str) -> None:
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     handlers: list[logging.Handler] = [logging.StreamHandler()]
+    ring = _RingBufferHandler()
+    ring.setFormatter(formatter)
+    handlers.append(ring)
     if path is not None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(
-            RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
-        )
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handlers.append(
+                RotatingFileHandler(
+                    path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+                )
+            )
+        except OSError:
+            # 数据目录不可写时 Web UI 仍要能启动，日志退化为 stderr + 内存。
+            logging.getLogger(__name__).warning("无法写入日志文件: %s", path, exc_info=True)
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",

@@ -223,7 +223,8 @@
   function loadLogs() {
     api("/api/logs?lines=200").then(function (data) {
       var view = el("logView");
-      view.textContent = data.logs || "暂无日志";
+      var paths = (data.log_paths || []).join("\n");
+      view.textContent = (paths ? "# 日志文件：" + paths + "\n\n" : "") + (data.logs || "暂无日志");
       view.scrollTop = view.scrollHeight;
     }).catch(function (error) {
       el("logView").textContent = error.message;
@@ -286,6 +287,58 @@
     });
   }
 
+  function cookieLogin() {
+    var button = el("cookieButton");
+    var value = el("cookieInput").value.trim();
+    if (!value) {
+      el("cookieStatus").textContent = "请先粘贴 Cookie";
+      return;
+    }
+    button.disabled = true;
+    el("cookieStatus").textContent = "正在验证 Cookie…";
+    api("/api/login/cookie", { method: "POST", body: { cookie: value } }).then(function () {
+      el("cookieStatus").textContent = "登录成功，正在刷新…";
+      el("cookieInput").value = "";
+      showToast("登录成功");
+      loadStatus(false);
+    }).catch(function (error) {
+      el("cookieStatus").textContent = error.message;
+      showToast(error.message, true);
+    }).finally(function () {
+      button.disabled = false;
+    });
+  }
+
+  function loadDiagnostics() {
+    var view = el("diagnosticsView");
+    view.classList.remove("hidden");
+    view.textContent = "加载中…";
+    api("/api/diagnostics").then(function (data) {
+      var lines = [];
+      lines.push("版本: " + (data.version || "-"));
+      lines.push("数据目录: " + (data.data_dir || "-"));
+      lines.push("设置文件: " + (data.settings_path || "-"));
+      lines.push("Python: " + (data.python || "-") + "  " + (data.platform || "-"));
+      lines.push("进程 PID: " + (data.pid || "-"));
+      lines.push("Unix Socket: " + (data.socket || "(未启用)"));
+      lines.push("工作目录: " + (data.cwd || "-"));
+      ["TRIM_APPDEST", "TRIM_PKGVAR", "WY_MUSIC_DATA_DIR", "WY_MUSIC_SETTINGS", "WY_MUSIC_LOG_FILE"].forEach(function (key) {
+        lines.push(key + ": " + ((data.env && data.env[key]) || "(空)"));
+      });
+      lines.push("");
+      lines.push("日志文件:");
+      (data.log_paths || []).forEach(function (item) {
+        lines.push("  " + item.path + "  " + (item.exists ? ("存在，" + (item.size || 0) + " 字节") : "不存在"));
+      });
+      lines.push("");
+      lines.push("最近日志:");
+      lines.push(data.logs || "暂无日志");
+      view.textContent = lines.join("\n");
+    }).catch(function (error) {
+      view.textContent = error.message;
+    });
+  }
+
   function syncNow(dryRun) {
     api("/api/sync", { method: "POST", body: { dry_run: dryRun } }).then(function (data) {
       showToast(data.started ? "同步任务已启动" : "已有同步任务在运行");
@@ -340,6 +393,8 @@
 
   function bind() {
     el("qrButton").addEventListener("click", startQr);
+    el("cookieButton").addEventListener("click", cookieLogin);
+    el("diagnosticsButton").addEventListener("click", loadDiagnostics);
     el("syncButton").addEventListener("click", function () { syncNow(false); });
     el("dryRunButton").addEventListener("click", function () { syncNow(true); });
     el("refreshButton").addEventListener("click", function () { loadStatus(false); });

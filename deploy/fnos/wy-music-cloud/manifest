@@ -1,5 +1,5 @@
 appname=wy-music-cloud
-version=0.2.3
+version=0.2.4
 display_name=网易云音乐云盘同步
 desc=原生飞牛应用：带 Web 界面和扫码登录，把本地音乐自动同步到网易云音乐云盘，支持本地与云端双重去重。
 source=thirdparty
@@ -15,4 +15,4 @@ disable_authorization_path=false
 install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=wy-music-cloud.main
-changelog=0.2.3：修复扫码后仍失败的问题，按网易云新版协议补上 chainId 和 noCheckToken，兼容 cookie/cookies 两种返回字段及安全验证码 8821；0.2.2：修复二维码域名 music.y.163.com；0.2.1：修复音乐目录粘贴换行；0.2.0：改为原生应用，新增 Web 界面和扫码登录。
+changelog=0.2.4：扫码登录改回网易云官方网页接口（不再使用 chainId/noCheckToken），新增 Cookie 登录兜底、内置日志缓冲和诊断信息，发布包文件名带版本号；0.2.3：尝试新版扫码参数；0.2.2：修复二维码域名；0.2.1：修复音乐目录粘贴换行；0.2.0：改为原生应用并新增 Web 界面。

@@ -46,6 +46,15 @@
           <p class="hint">打开网易云音乐 App → 左上角菜单 → 扫一扫。</p>
         </div>
       </div>
+      <details class="cookie-login">
+        <summary>扫码失败？改用 Cookie 登录</summary>
+        <p class="hint">在已登录 music.163.com 的浏览器中打开开发者工具，复制包含 MUSIC_U 的完整 Cookie。登录状态只保存在本机。</p>
+        <textarea id="cookieInput" rows="3" spellcheck="false" placeholder="MUSIC_U=...; __csrf=..."></textarea>
+        <div class="form-actions">
+          <button id="cookieButton" class="btn ghost" type="button">用 Cookie 登录</button>
+          <span id="cookieStatus" class="status-line"></span>
+        </div>
+      </details>
     </section>
 
     <div id="dashboard" class="dashboard hidden">
@@ -137,9 +146,13 @@
             <h2>运行日志</h2>
             <p class="muted">最近 200 行，保存在本机数据目录。</p>
           </div>
-          <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
+          <div class="log-actions">
+            <button id="diagnosticsButton" class="btn ghost" type="button">诊断信息</button>
+            <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
+          </div>
         </div>
         <pre id="logView" class="log-view">加载中…</pre>
+        <pre id="diagnosticsView" class="log-view hidden"></pre>
       </section>
     </div>
   </main>

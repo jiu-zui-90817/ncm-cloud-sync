@@ -47,13 +47,15 @@ def test_qr_login_expired(monkeypatch) -> None:
         login.qr_login(Expired(), qr_path=None, output=lambda _: None)
 
 
-def test_build_qr_url_has_chain_id() -> None:
-    url = login.build_qr_url("abc", "v1_TEST_web_login_1")
+def test_build_qr_url_matches_official_desktop_flow() -> None:
+    url = login.build_qr_url("abc")
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
+    assert parsed.scheme == "https"
     assert parsed.netloc == "music.163.com"
+    assert parsed.path == "/login"
     assert query["codekey"] == ["abc"]
-    assert query["chainId"] == ["v1_TEST_web_login_1"]
+    assert "chainId" not in query
 
 
 def test_qr_login_accepts_singular_cookie(monkeypatch) -> None:
