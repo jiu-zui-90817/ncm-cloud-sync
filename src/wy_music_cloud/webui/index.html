@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>网易云音乐云盘同步</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="favicon.svg" alt="" class="brand-icon">
+      <div>
+        <h1>网易云音乐云盘同步</h1>
+        <p class="subtitle">飞牛 NAS · 自动上传 · MD5 去重</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="version" class="pill">v-</span>
+      <span id="accountBadge" class="pill muted">未登录</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section id="loginCard" class="card login-card">
+      <div class="card-head">
+        <div>
+          <h2>扫码登录网易云音乐</h2>
+          <p class="muted">用网易云音乐 App 扫码，登录状态只保存在本机。</p>
+        </div>
+        <span class="tag">首次使用</span>
+      </div>
+      <div class="login-body">
+        <div id="qrBox" class="qr-box">
+          <div id="qrPlaceholder" class="qr-placeholder">
+            <span>点击下方按钮生成二维码</span>
+          </div>
+          <div id="qrImage" class="qr-image"></div>
+        </div>
+        <div class="login-actions">
+          <button id="qrButton" class="btn primary" type="button">生成登录二维码</button>
+          <p id="qrStatus" class="status-line">二维码有效期约 4 分钟，过期后可重新生成。</p>
+          <p class="hint">打开网易云音乐 App → 左上角菜单 → 扫一扫。</p>
+        </div>
+      </div>
+    </section>
+
+    <div id="dashboard" class="dashboard hidden">
+      <section class="card account-card">
+        <div>
+          <p class="eyebrow">当前账号</p>
+          <h2 id="nickname">-</h2>
+          <p class="muted" id="userId">-</p>
+        </div>
+        <div class="account-actions">
+          <button id="refreshAccount" class="btn ghost" type="button">刷新账号</button>
+          <button id="logoutButton" class="btn danger-ghost" type="button">退出登录</button>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
+        <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong></article>
+        <article class="stat"><span class="stat-label">失败</span><strong id="statFailed">0</strong></article>
+        <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
+        <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>同步控制</h2>
+            <p class="muted" id="syncHint">同步任务在后台运行，可随时关闭页面。</p>
+          </div>
+          <span id="syncState" class="tag">空闲</span>
+        </div>
+        <div class="actions">
+          <button id="syncButton" class="btn primary" type="button">立即同步</button>
+          <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
+          <button id="refreshButton" class="btn ghost" type="button">刷新状态</button>
+        </div>
+        <div class="sync-meta">
+          <div><span class="meta-label">上次运行</span><span id="lastRun">-</span></div>
+          <div><span class="meta-label">下次计划</span><span id="nextRun">-</span></div>
+          <div><span class="meta-label">同步间隔</span><span id="intervalLabel">-</span></div>
+        </div>
+        <div id="progressBox" class="progress-box hidden">
+          <div class="progress-head"><span>正在处理</span><span id="progressCount"></span></div>
+          <ul id="progressList" class="progress-list"></ul>
+        </div>
+        <p id="syncError" class="error-line hidden"></p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>音乐目录与设置</h2>
+            <p class="muted">每行一个绝对路径。保存后下一轮同步生效。</p>
+          </div>
+        </div>
+        <form id="settingsForm" class="settings-form">
+          <label class="field wide">
+            <span>音乐目录</span>
+            <textarea id="musicDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music"></textarea>
+          </label>
+          <label class="field">
+            <span>同步间隔（秒）</span>
+            <input id="interval" type="number" min="60" max="86400" step="60" value="3600">
+          </label>
+          <label class="field">
+            <span>日志级别</span>
+            <select id="logLevel">
+              <option value="DEBUG">DEBUG</option>
+              <option value="INFO">INFO</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+          </label>
+          <label class="check-field">
+            <input id="dryRun" type="checkbox">
+            <span>默认只演练，不真正上传</span>
+          </label>
+          <div class="form-actions">
+            <button id="saveSettings" class="btn primary" type="submit">保存设置</button>
+            <span id="settingsStatus" class="status-line"></span>
+          </div>
+        </form>
+        <div id="dirWarnings" class="dir-warnings"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>运行日志</h2>
+            <p class="muted">最近 200 行，保存在本机数据目录。</p>
+          </div>
+          <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
+        </div>
+        <pre id="logView" class="log-view">加载中…</pre>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+</body>
+</html>

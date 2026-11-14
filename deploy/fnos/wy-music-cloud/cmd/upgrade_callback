@@ -1,24 +1,23 @@
 #!/bin/bash
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=common.sh
 . "$SCRIPT_DIR/common.sh"
 
-MUSIC_DIR="$(read_env WY_MUSIC_DIR || true)"
-MUSIC_DIR="${MUSIC_DIR:-/vol1/1000/Music}"
-INTERVAL="$(read_env WY_MUSIC_INTERVAL || true)"
-INTERVAL="${INTERVAL:-3600}"
-TIMEZONE="$(read_env TZ || true)"
-TIMEZONE="${TIMEZONE:-Asia/Shanghai}"
-DRY_RUN="$(read_env WY_MUSIC_DRY_RUN || true)"
-DRY_RUN="${DRY_RUN:-false}"
-PUID_VALUE="$(read_env PUID || true)"
-PUID_VALUE="${PUID_VALUE:-1000}"
-PGID_VALUE="$(read_env PGID || true)"
-PGID_VALUE="${PGID_VALUE:-1000}"
-VERSION="${TRIM_APPVER:-0.1.0}"
+APPDIR="${TRIM_APPDEST:?缺少 TRIM_APPDEST}"
+VARDIR="${TRIM_PKGVAR:?缺少 TRIM_PKGVAR}"
+mkdir -p "$VARDIR/data"
+chmod 700 "$VARDIR/data" 2>/dev/null || true
 
-write_env_file "$MUSIC_DIR" "$INTERVAL" "$TIMEZONE" "$DRY_RUN" "$PUID_VALUE" "$PGID_VALUE" "$VERSION"
-write_login_hint
-echo "wy-music-cloud 已升级到 $VERSION，配置已保留"
+# 升级不覆盖用户设置；只有设置文件丢失时才用向导值重建。
+if [ ! -f "$VARDIR/settings.json" ]; then
+  apply_wizard_settings "$APPDIR" "$VARDIR"
+else
+  write_login_hint "$VARDIR" "$APPDIR"
+fi
+rm -f "$APPDIR/app.sock" "$VARDIR/app.pid"
+
+if [ "$(id -u)" = "0" ] && [ -n "${TRIM_UID:-}" ]; then
+  chown -R "${TRIM_UID}:${TRIM_GID:-$TRIM_UID}" "$VARDIR" 2>/dev/null || true
+fi
+
+printf "升级完成，原有登录状态和同步记录已保留。\n"

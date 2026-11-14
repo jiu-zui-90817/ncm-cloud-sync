@@ -3,12 +3,25 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/deploy/fnos/wy-music-cloud"
-CTX="$APP/app/docker/context"
+SERVER="$APP/app/server"
 DIST="$ROOT/dist"
+WHEEL_ROOT="$ROOT/.wheels/native"
+TMP_ROOT="$ROOT/.tmp/fnpack-native"
 
-TMP_ROOT="$ROOT/.tmp/fnpack"
-rm -rf "$TMP_ROOT" "$CTX"
-mkdir -p "$TMP_ROOT" "$CTX/deploy/docker" "$DIST"
+if command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  PYTHON_BIN="python3"
+fi
+
+PIP=("$PYTHON_BIN" -m pip)
+if [ -f "$ROOT/.pipfix/run_pip.py" ]; then
+  PIP=("$PYTHON_BIN" "$ROOT/.pipfix/run_pip.py")
+fi
+
+rm -rf "$TMP_ROOT" "$SERVER"
+rm -f "$DIST/wy-music-cloud.fpk" "$ROOT"/*.fpk "$APP"/*.fpk
+mkdir -p "$TMP_ROOT" "$DIST" "$SERVER/vendor" "$APP/app/ui/images"
 chmod 777 "$TMP_ROOT"
 if command -v cygpath >/dev/null 2>&1; then
   TMP_FOR_FNPACK="$(cygpath -w "$TMP_ROOT")"
@@ -17,12 +30,42 @@ else
 fi
 export TMPDIR="$TMP_FOR_FNPACK" TMP="$TMP_FOR_FNPACK" TEMP="$TMP_FOR_FNPACK"
 
-cp "$ROOT/pyproject.toml" "$ROOT/README.md" "$ROOT/LICENSE" "$CTX/"
-cp -R "$ROOT/src" "$CTX/src"
-cp "$ROOT/deploy/docker/Dockerfile" "$CTX/Dockerfile"
-cp "$ROOT/deploy/docker/entrypoint.sh" "$CTX/deploy/docker/entrypoint.sh"
-find "$CTX" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+# 1. 应用源码
+cp -R "$ROOT/src/wy_music_cloud" "$SERVER/wy_music_cloud"
+find "$SERVER" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+find "$SERVER" -type f -name "*.pyc" -delete 2>/dev/null || true
 
+# 2. 两个架构的离线依赖。Windows 上 python -m zipfile 也能解压 manylinux wheel。
+for ARCH in x86_64 aarch64; do
+  WHEEL_DIR="$WHEEL_ROOT/$ARCH"
+  VENDOR="$SERVER/vendor/$ARCH"
+  mkdir -p "$WHEEL_DIR" "$VENDOR"
+  if ! ls "$WHEEL_DIR"/*.whl >/dev/null 2>&1; then
+    echo "下载 $ARCH wheel..."
+    "${PIP[@]}" download --dest "$WHEEL_DIR" --only-binary=:all: \
+      --platform "manylinux2014_$ARCH" --python-version 312 \
+      --implementation cp --abi cp312 --no-cache-dir --timeout 30 --retries 3 \
+      -r "$ROOT/requirements-native.txt"
+  fi
+  for WHL in "$WHEEL_DIR"/*.whl; do
+    "$PYTHON_BIN" -m zipfile -e "$WHL" "$VENDOR"
+  done
+  find "$VENDOR" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
+  for MODULE in httpx waitress Crypto mutagen yaml qrcode; do
+    if [ ! -e "$VENDOR/$MODULE" ]; then
+      echo "缺少模块 $MODULE（$ARCH），请检查 wheel 下载。" >&2
+      exit 1
+    fi
+  done
+done
+
+# 3. 图标（仓库已提交生成结果；缺失时再用 Pillow 生成）
+if [ ! -f "$APP/ICON.PNG" ] || [ ! -f "$APP/ICON_256.PNG" ] || \
+   [ ! -f "$APP/app/ui/images/icon_64.png" ] || [ ! -f "$APP/app/ui/images/icon_256.png" ]; then
+  "$PYTHON_BIN" "$ROOT/scripts/make_icons.py"
+fi
+
+# 4. 打包
 if [ -x "$ROOT/.tools/fnpack.exe" ]; then
   FN="$ROOT/.tools/fnpack.exe"
 elif [ -x "$ROOT/.tools/fnpack" ]; then
@@ -37,22 +80,18 @@ fi
 "$FN" build --directory "$APP"
 
 shopt -s nullglob
-for fpk in "$APP"/*.fpk "$ROOT"/*.fpk; do
-  mv "$fpk" "$DIST/"
+for FPK in "$APP"/*.fpk "$ROOT"/*.fpk; do
+  mv "$FPK" "$DIST/"
 done
+shopt -u nullglob
 
-FPK_COUNT="$(find "$DIST" -maxdepth 1 -name '*.fpk' | wc -l)"
-if [ "$FPK_COUNT" -eq 0 ]; then
-  echo "fnpack 没有生成 fpk，请检查上方错误。" >&2
+FPK_FILE="$DIST/wy-music-cloud.fpk"
+if [ ! -f "$FPK_FILE" ]; then
+  echo "fnpack 没有生成 $FPK_FILE，请检查上方错误。" >&2
   exit 1
 fi
 
-PYTHON_BIN=python
-if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  PYTHON_BIN=python3
-fi
-FPK_FILE="$(find "$DIST" -maxdepth 1 -name '*.fpk' -print -quit)"
 "$PYTHON_BIN" "$ROOT/scripts/fix-fpk-modes.py" "$FPK_FILE"
 
-echo "构建完成："
-find "$DIST" -maxdepth 1 -name '*.fpk' -exec ls -lh {} +
+echo "构建完成：$FPK_FILE"
+ls -lh "$FPK_FILE"

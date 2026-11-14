@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "deploy" / "fnos" / "wy-music-cloud"
+UI = APP / "app" / "ui" / "images"
 
 
 def draw_icon(size: int) -> Image.Image:
@@ -56,9 +57,12 @@ def draw_icon(size: int) -> Image.Image:
 
 def main() -> None:
     APP.mkdir(parents=True, exist_ok=True)
-    draw_icon(512).save(APP / "ICON.PNG", "PNG")
+    UI.mkdir(parents=True, exist_ok=True)
+    draw_icon(64).save(APP / "ICON.PNG", "PNG")
     draw_icon(256).save(APP / "ICON_256.PNG", "PNG")
-    print(f"wrote {APP / 'ICON.PNG'} and {APP / 'ICON_256.PNG'}")
+    draw_icon(64).save(UI / "icon_64.png", "PNG")
+    draw_icon(256).save(UI / "icon_256.png", "PNG")
+    print(f"wrote icons to {APP} and {UI}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-
-# 不自动删除用户数据卷，避免卸载/重装时误丢登录态和去重状态。
-echo "wy-music-cloud: Docker 数据卷 wy-music-cloud-data 已保留。"
-echo "如需彻底删除，请手动执行: docker volume rm wy-music-cloud-data"
+APPDIR="${TRIM_APPDEST:-}"
+VARDIR="${TRIM_PKGVAR:-}"
+[ -n "$APPDIR" ] && rm -f "$APPDIR/app.sock"
+[ -n "$VARDIR" ] && rm -f "$VARDIR/app.pid"
+printf "已卸载程序。数据目录（登录状态、同步记录、日志）保留：%s\n" "${VARDIR:-未知}"
+printf "如需彻底删除，请手动删除该目录。\n"

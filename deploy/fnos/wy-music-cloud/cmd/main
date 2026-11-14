@@ -1,24 +1,102 @@
 #!/bin/bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/common.sh"
 
-CONTAINER_NAME="wy-music-cloud"
+APP_DIR="${TRIM_APPDEST:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+VAR_DIR="${TRIM_PKGVAR:-$APP_DIR/var}"
+DATA_DIR="$VAR_DIR/data"
+SOCKET="$APP_DIR/app.sock"
+PID="$VAR_DIR/app.pid"
+LOG="$VAR_DIR/app.log"
 
-case "$1" in
-  start)
-    # Docker 项目由应用中心启动，这里无需重复操作。
+export WY_MUSIC_DATA_DIR="$DATA_DIR"
+export WY_MUSIC_SETTINGS="$VAR_DIR/settings.json"
+export WY_MUSIC_SOCKET="$SOCKET"
+export WY_MUSIC_LOG_FILE="$LOG"
+export PYTHONUTF8=1
+export PYTHONUNBUFFERED=1
+
+prepare_dirs() {
+  mkdir -p "$DATA_DIR"
+  chmod 700 "$DATA_DIR" 2>/dev/null || true
+  if [ "$(id -u)" = "0" ] && [ -n "${TRIM_UID:-}" ]; then
+    chown -R "${TRIM_UID}:${TRIM_GID:-$TRIM_UID}" "$VAR_DIR" 2>/dev/null || true
+  fi
+}
+
+start_app() {
+  prepare_dirs
+  if is_running "$PID" "$SOCKET"; then
     exit 0
-    ;;
-  stop)
-    # Docker 项目由应用中心停止，这里无需重复操作。
-    exit 0
-    ;;
-  status)
-    if docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null | grep -q '^true$'; then
+  fi
+  rm -f "$PID" "$SOCKET"
+
+  local arch python vendor
+  arch="$(find_arch)" || fail "不支持的 CPU 架构：$(uname -m)"
+  vendor="${WY_MUSIC_VENDOR:-$APP_DIR/server/vendor/$arch}"
+  [ -d "$vendor" ] || fail "缺少 $arch 依赖目录：$vendor"
+  python="$(find_python "$APP_DIR")" || fail "找不到 python3，请确认已安装 python312 依赖"
+  [ -x "$python" ] || fail "Python 不可执行：$python"
+
+  export PYTHONPATH="$APP_DIR/server:$vendor${PYTHONPATH:+:$PYTHONPATH}"
+  cd "$APP_DIR"
+  printf "\n[%s] 启动 Web 服务\n" "$(date "+%Y-%m-%d %H:%M:%S")" >>"$LOG"
+  nohup "$python" -m wy_music_cloud.web >>"$LOG" 2>&1 &
+  printf "%s\n" "$!" >"$PID"
+
+  local i pid
+  for i in $(seq 1 100); do
+    if [ -S "$SOCKET" ]; then
       exit 0
     fi
-    exit 3
-    ;;
+    pid="$(cat "$PID" 2>/dev/null || true)"
+    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+      fail "Web 服务启动失败，请查看日志：$LOG"
+    fi
+    sleep 0.2
+  done
+  fail "Web 服务在 20 秒内没有就绪，请查看日志：$LOG"
+}
+
+stop_app() {
+  rm -f "$SOCKET"
+  if [ ! -f "$PID" ]; then
+    return 0
+  fi
+  local pid i
+  pid="$(cat "$PID" 2>/dev/null || true)"
+  case "$pid" in
+    ""|*[!0-9]*) rm -f "$PID"; return 0 ;;
+  esac
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    for i in $(seq 1 50); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.2
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID" "$SOCKET"
+}
+
+status_app() {
+  if is_running "$PID" "$SOCKET"; then
+    exit 0
+  fi
+  exit 3
+}
+
+case "${1:-status}" in
+  start) start_app ;;
+  stop) stop_app ;;
+  status) status_app ;;
   *)
-    echo "未知命令: $1" > "${TRIM_TEMP_LOGFILE:-/dev/null}"
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+      printf "未知命令：%s\n" "${1:-}" >>"${TRIM_TEMP_LOGFILE}"
+    fi
     exit 1
     ;;
 esac

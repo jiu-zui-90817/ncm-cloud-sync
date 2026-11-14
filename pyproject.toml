@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wy-music-cloud"
-version = "0.1.0"
-description = "网易云音乐云盘自动同步工具，适合飞牛 NAS / Docker 长期运行"
+version = "0.2.0"
+description = "网易云音乐云盘自动同步工具，带 Web 管理界面，适合飞牛 NAS / Docker 长期运行"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -22,6 +22,7 @@ dependencies = [
   "mutagen>=1.47",
   "PyYAML>=6.0",
   "qrcode[pil]>=7.4",
+  "waitress>=3.0",
 ]
 
 [project.optional-dependencies]

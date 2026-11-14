@@ -1,33 +1,36 @@
 # wy-music-cloud
 
-把本地音乐自动同步到**网易云音乐「音乐云盘」**的轻量工具，专为飞牛 NAS（fnOS）/ Docker 长期运行设计，带**本地 MD5 + 云端 upload/check 双重去重**。
+把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用，带 Web 管理界面、扫码登录，以及**本地 MD5 + 云端 upload/check 双重去重**。
 
 > 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端逆向出的 weapi / NOS 上传链路，接口随时可能变化。请先看[风险与限制](#风险与限制)。
 
-## 为什么做这个
+![Web UI 登录页](docs/images/webui.png)
 
-现有工具大多是桌面 GUI 或一次性上传脚本：
+## 它是什么
 
-- [lulu-ls/cloud-uploader](https://github.com/lulu-ls/cloud-uploader)：Electron 桌面工具，适合 Mac 手动上传；
-- [ovnrain/netease-music-cloud-uploader](https://github.com/ovnrain/netease-music-cloud-uploader)：项目说明中提到网易云 3.0 客户端已原生支持上传，因此停更；
-- 其他 Python / GUI 工具通常没有“NAS 常驻 + 持久化去重 + 失败重试”的组合。
+这是一个**不依赖 Docker 的 fnOS 原生应用**：应用中心安装后以普通进程运行 Python 服务，通过飞牛统一网关打开内置 Web UI。你可以在界面里完成扫码登录、查看同步状态、修改设置、看日志，不需要 SSH。
 
-本项目把上传流程做成一个无界面服务：扫描目录、算 MD5、查本地状态库、查云端是否已有、上传、落库，循环执行。
+后台按设定间隔扫描音乐目录：
+
+- 文件没变就跳过；
+- 相同内容只上传一份；
+- 上传前再问一次云端，云端已有就不重复上传；
+- 单个文件失败只影响它自己，下一轮继续。
 
 ## 特性
 
-- **增量同步**：SQLite 记录 `path + size + mtime_ns + md5 + status`，文件没变就直接跳过，不重复计算、不重复上传。
+- **原生飞牛应用**：`.fpk` 安装，带安装向导、启停、升级和卸载回调；**不需要 Docker**。
+- **内置 Web UI**：登录、状态、统计、手动同步、演练、设置、日志都在界面里完成。
+- **扫码登录**：界面生成网易云登录二维码，手机 App 扫码确认即可；登录态保存在应用数据目录。
 - **双重去重**：
   1. **本地去重**：内容相同（MD5 相同）的多个文件只上传一份，其余标记为 `skipped_local`；
-  2. **云端去重**：每次真正上传前调用 `/api/cloud/upload/check`，`needUpload=false` 说明云盘已有，标记为 `skipped_remote`，不再走上传。
-- **元数据写入**：用 mutagen 读取标题 / 艺术家 / 专辑，上传时一并提交；没有标签时回退到文件名 / “未知艺术家”。
-- **多种登录**：扫码登录、手机号密码登录、直接粘贴 Cookie；会话保存在 `data/session.json`（权限 0600）。
-- **安全试跑**：`--dry-run` 只检查并打印计划，不分配 token、不上传、不写上传状态。
-- **失败隔离**：单个文件失败只标记该文件，下一轮继续；支持 `reset-failed` 重试。
-- **常驻 / 定时**：内置轮询 daemon，也可以交给飞牛“计划任务”定时执行一次 `sync`。
-- **原生飞牛应用**：提供 `deploy/fnos/wy-music-cloud` 应用工程，可打包成 `.fpk`，在 fnOS 应用中心手动安装，带安装向导、启停和升级回调。
-- **容器友好**：非 root 运行，`/music` 只读挂载，状态与会话都在 `/data`。
-- **中文日志与状态**：`status` 直接看扫描 / 上传 / 跳过 / 失败统计和最近运行。
+  2. **云端去重**：每次真正上传前调用 `/api/cloud/upload/check`，`needUpload=false` 说明云盘已有，标记为 `skipped_remote`。
+- **增量同步**：SQLite 记录 `path + size + mtime_ns + md5 + status`，文件没变不重复计算、不重复上传。
+- **安全试跑**：界面里的“演练”只检查并显示计划，不分配 token、不上传、不写上传状态。
+- **多目录 / 多格式**：可配置多个音乐目录；支持 mp3、flac、m4a、aac、ogg、opus、wav 等。
+- **元数据写入**：用 mutagen 读取标题 / 艺术家 / 专辑，上传时一并提交；没有标签时回退到文件名。
+- **失败隔离**：单个文件失败只标记该文件，下一轮继续；可重置失败状态重试。
+- **中文界面与日志**：状态、错误原因、最近运行记录都直接可读。
 
 ## 工作流程
 
@@ -45,21 +48,31 @@
 
 去重顺序是“先本地、再云端”。云端 check 是最终权威：即使本地状态库丢失，只要云端已有同 MD5 的歌曲，也不会重复上传。
 
-## 飞牛 NAS 原生应用（推荐）
+## 安装（飞牛 NAS，推荐）
 
-仓库里的 `deploy/fnos/wy-music-cloud` 是标准 fnOS Docker 应用工程，打包后得到 `.fpk`。
+### 环境要求
+
+- fnOS **1.2.0 或更高版本**；
+- x86_64 或 aarch64；
+- 应用中心可以安装官方 `python312` 依赖（`manifest` 已声明 `install_dep_apps=python312`，安装时自动处理）。
+
+不需要 Docker，也不需要 NAS 上预装 Python 包；运行时依赖已经随 `.fpk` 打包在应用目录中。
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载 `wy-music-cloud.fpk`，打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的 `wy-music-cloud.fpk`，打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
 ```bash
+git clone https://github.com/jiu-zui-90817/wy-music-cloud.git
+cd wy-music-cloud
 # 需要 fnOS 官方 fnpack，放到 .tools/ 或加入 PATH
 bash scripts/build-fnos.sh
 # 产物：dist/wy-music-cloud.fpk
 ```
+
+构建脚本会从 PyPI 下载 x86_64 / aarch64 的 cp312 离线 wheel，再调用 `fnpack` 打包；构建机需要网络，NAS 运行时不需要。
 
 ### 2. 安装向导
 
@@ -67,121 +80,102 @@ bash scripts/build-fnos.sh
 
 | 项目 | 默认值 | 说明 |
 | --- | --- | --- |
-| 音乐目录 | `/vol1/1000/Music` | NAS 上的绝对路径，必须已存在；容器内只读挂载到 `/music` |
-| 扫描间隔 | `3600` | 秒，最小 60 |
-| 时区 | `Asia/Shanghai` | 传给容器 |
-| 试运行 | `false` | 第一次可先设为 `true` |
-| 运行 UID / GID | `1000` / `1000` | 用 `id` 查看音乐目录属主，避免权限问题 |
+| 音乐目录 | `/vol1/1000/Music` | NAS 上的绝对路径，必须已存在；应用只读扫描 |
+| 同步间隔 | `3600` | 秒，最小 60，最大 86400 |
+| 演练模式 | `false` | 第一次可先设为 `true`，只检查不上传 |
+| 日志级别 | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-安装后配置写入应用目录的 `docker/.env`，升级和修改配置会保留。
+如果音乐目录的权限不允许应用包用户读取，应用中心会提示你授权目录；也可以在文件管理里给应用用户读权限。安装设置保存在应用数据目录的 `settings.json`，升级和修改配置会保留。
 
-### 3. 首次启动
+### 3. 启动
 
-应用中心启动后，Docker Compose 会在 NAS 上构建镜像（基础镜像 `python:3.12-slim` 需要联网拉取）。第一次可能需要几分钟，期间应用状态可能短暂显示未运行，构建完成后容器会自动启动。
+在应用中心启动「网易云音乐云盘同步」，然后点击桌面图标或应用中心的“打开”。Web UI 通过飞牛统一网关加载，无需额外端口，也无需 SSH。
 
-日志：
+首次启动会初始化数据目录并拉起后台服务；如果页面暂时打不开，等几秒后刷新，或到应用数据目录查看 `app.log`。
 
-```bash
-sudo docker logs -f wy-music-cloud
-```
+### 4. 扫码登录
 
-### 4. 登录（SSH，一次即可）
+1. 在 Web UI 点击「生成登录二维码」；
+2. 用网易云音乐手机 App 扫码；
+3. 在手机上确认登录；
+4. 页面显示账号昵称后即可开始同步。
 
-应用没有桌面界面，首次需要在 NAS 上执行一次登录。应用安装目录通常是 `/var/apps/wy-music-cloud`，以实际为准；安装回调也会把登录提示写到应用数据目录的 `login.txt`。
+二维码有效期约 4 分钟，过期后重新生成即可。登录态保存在 `data/session.json`（权限 0600），卸载/升级应用时请一并备份。
 
-```bash
-cd /var/apps/wy-music-cloud/docker
-sudo docker compose -p wy-music-cloud run --rm wy-music-cloud login --qr-png /data/qr.png
-```
+### 5. 开始使用
 
-终端会显示二维码；用网易云音乐 App 扫码并确认。登录态保存在 Docker 数据卷 `wy-music-cloud-data` 中，升级/重装应用不会丢失。
+- **立即同步**：马上跑一轮真实上传；
+- **演练**：跑一轮只检查、不上传，适合首次确认；
+- **刷新**：更新状态统计；
+- **设置**：修改音乐目录、同步间隔、日志级别、演练模式；
+- **日志**：查看最近运行日志和错误原因。
 
-也可以粘贴 Cookie：
+后台会按 `同步间隔` 自动执行；应用停止后不会运行，重新启动后恢复。第一次建议先点「演练」，确认待上传数量符合预期。
 
-```bash
-sudo docker compose -p wy-music-cloud run --rm wy-music-cloud login --cookie "MUSIC_U=...; __csrf=..."
-```
+### 数据目录与备份
 
-### 5. 验证与试跑
-
-```bash
-sudo docker compose -p wy-music-cloud run --rm wy-music-cloud check
-sudo docker compose -p wy-music-cloud run --rm wy-music-cloud sync --dry-run --limit 5
-```
-
-确认输出符合预期后，可以直接在应用中心把“试运行”改为 `false`，或手动跑一次：
-
-```bash
-sudo docker compose -p wy-music-cloud run --rm wy-music-cloud sync --limit 5
-```
-
-更完整的安装、升级、备份和排错说明见 [docs/fnos-deployment.md](docs/fnos-deployment.md)。
-
-## Docker 运行（通用 / 开发）
-
-### 1. 准备目录
+应用数据目录通常在 `/var/apps/wy-music-cloud/var`（以应用中心显示为准），里面有：
 
 ```text
-wy-music-cloud/
-├── config.yaml          # 配置（只读挂载）
-├── data/                # state.db、session.json、qr.png、last_run.json
-└── docker-compose.yml
-
-/vol1/1000/Music/        # 你的音乐目录（只读挂载到 /music）
+var/
+├── settings.json      # 音乐目录、间隔、日志级别
+├── app.log            # 应用日志
+├── login.txt          # 安装时的登录提示
+└── data/
+    ├── state.db       # SQLite 同步状态（去重核心）
+    ├── session.json   # 登录态（敏感）
+    ├── last_run.json  # 最近一次运行结果
+    └── qr.png         # 旧版 CLI 登录二维码（如使用过）
 ```
 
-### 2. 配置
+建议备份 `settings.json`、`data/state.db`、`data/session.json`。`session.json` 等同于账号登录凭证，不要公开。
+
+卸载回调默认保留数据目录，方便重装后继续使用；但应用中心的具体清理行为可能不同，卸载前请先备份。
+
+### 常见问题
+
+**页面打不开 / 502**
+
+先看应用是否已启动，再看数据目录的 `app.log`。首次启动需要等 Python 服务就绪，通常几秒。
+
+**提示没有 python312**
+
+在应用中心确认官方 `python312` 依赖已安装；如果安装失败，重新安装本应用，应用中心会重新处理依赖。
+
+**扫码后仍显示未登录**
+
+确认手机上点了“确认登录”，并检查系统时间是否准确。二维码过期就重新生成。也可以退出登录后重试。
+
+**扫描不到音乐**
+
+检查设置里的音乐目录是否是绝对路径、是否存在、应用包用户是否有读权限。目录名区分大小写。
+
+**同步失败**
+
+看日志里的具体错误。常见原因是网络、Cookie 失效、云盘容量或接口变动。单个文件失败不会阻塞其他文件。
+
+**升级后设置还在吗**
+
+在。设置和状态都在应用数据目录；升级回调只更新程序，不删除数据。
+
+## 可选：Docker / 命令行
+
+如果你不在飞牛上，或者更喜欢容器，仓库仍保留 Docker 和 CLI 方式。它们和原生应用共用同一套同步核心。
+
+### Docker
 
 ```bash
 cp config.example.yaml config.yaml
 # 编辑 config.yaml，至少设置 music_dirs
-```
-
-容器内建议：
-
-```yaml
-music_dirs:
-  - /music
-data_dir: /data
-```
-
-### 3. 构建并登录
-
-```bash
 docker compose build
 docker compose run --rm wy-music-cloud login --qr-png /data/qr.png
-```
-
-终端会显示二维码，同时把二维码保存到 `data/qr.png`。用网易云音乐 App 扫码确认；登录成功后会话写入 `data/session.json`。
-
-也可以直接粘贴 Cookie：
-
-```bash
-docker compose run --rm wy-music-cloud login --cookie "MUSIC_U=...; __csrf=..."
-```
-
-### 4. 试跑
-
-```bash
 docker compose run --rm wy-music-cloud sync --dry-run --limit 5
-```
-
-确认输出里的“待上传”符合预期后，再真正执行：
-
-```bash
-docker compose run --rm wy-music-cloud sync
-```
-
-### 5. 常驻
-
-```bash
 docker compose up -d
-docker compose logs -f --tail=100
 ```
 
-默认每 `interval` 秒跑一轮。飞牛 NAS 的部署细节、权限、计划任务和排错见 [docs/fnos-deployment.md](docs/fnos-deployment.md)。
+Docker 细节见 [docs/fnos-deployment.md](docs/fnos-deployment.md) 的 Docker 章节。
 
-## 本机运行（Windows / Linux / macOS）
+### 本机 CLI
 
 需要 Python 3.10+。
 
@@ -200,18 +194,18 @@ wy-music-cloud --music-dir "D:\Music" sync
 
 ## 配置
 
-完整注释版见 [config.example.yaml](config.example.yaml)。
+原生应用优先使用 Web UI 的设置；CLI 和 Docker 使用 `config.yaml` 或环境变量。完整注释版见 [config.example.yaml](config.example.yaml)。
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
 | `music_dirs` | `[]` | 要扫描的音乐目录，可多个；相对路径相对于配置文件所在目录 |
-| `data_dir` | `data` | 状态库、会话、二维码、最近运行记录目录 |
-| `cookie` | `""` | 直接写 Cookie 字符串（不推荐，优先用登录命令） |
+| `data_dir` | `data` | 状态库、会话、最近运行记录目录 |
+| `cookie` | `""` | 直接写 Cookie 字符串（不推荐，优先用登录命令或 Web UI） |
 | `cookie_file` | `null` | 从文件读取 Cookie |
 | `extensions` | 见示例 | 扫描的音频扩展名 |
 | `upload_extensions` | 见示例 | 允许上传的扩展名；不在列表里的只统计、不上传 |
 | `exclude` | `.*`, `@eaDir`, `#recycle`, `lost+found` | 跳过的目录 / 文件通配符 |
-| `interval` | `3600` | daemon 轮询间隔（秒） |
+| `interval` | `3600` | 自动同步间隔（秒） |
 | `rate_limit` | `0.5` | 两次上传之间的额外等待（秒） |
 | `timeout` | `30` | 单次 HTTP 超时（秒） |
 | `retries` | `3` | 网络 / 5xx 重试次数 |
@@ -239,7 +233,7 @@ wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 | `check` | 检查登录状态，打印云盘歌曲数 |
 | `scan [--json]` | 只扫描本地文件，不上传 |
 | `sync [--dry-run] [--force] [--limit N]` | 执行一轮同步 |
-| `daemon [--dry-run] [--force] [--no-run-now]` | 常驻轮询 |
+| `daemon [--dry-run] [--force] [--no-run-now]` | 常驻轮询（原生应用不需要） |
 | `status [--json]` | 查看状态库统计、最近运行、最近文件 |
 | `config` | 打印生效配置（Cookie 已隐藏） |
 | `reset-failed` | 把 `failed` 重置为待处理，下一轮重试 |
@@ -268,11 +262,12 @@ wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 ## 风险与限制
 
 - 使用的是**非公开接口**，随时可能失效；协议集中在 [src/wy_music_cloud/client.py](src/wy_music_cloud/client.py)，细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
-- 不要用主账号做高频、大批量上传；建议先 `--dry-run --limit` 小流量验证。
+- 不要用主账号做高频、大批量上传；建议先用演练 / `--limit` 小流量验证。
 - 云盘容量、单文件大小、格式支持由网易云账号决定；本项目不做转码。
 - 云盘是扁平结构，本项目不创建文件夹层级。
 - 本项目不会修改你的本地音频标签，也不会下载歌曲。
-- 飞牛应用首次启动需要 NAS 能访问 Docker Hub / PyPI 来构建镜像；构建完成后离线运行。
+- 原生应用运行时不依赖 Docker / PyPI，但构建 `.fpk` 时需要网络下载离线依赖。
+- Web UI 仅对管理员开放，但登录态仍等同于账号凭证；不要把数据目录暴露给不可信用户。
 - 请只同步你有权上传的音乐。
 
 ## 开发与测试
@@ -282,15 +277,15 @@ pip install -e ".[dev]"
 pytest
 ```
 
-当前测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、dry-run、缺失文件、QR 登录、daemon 和 CLI。
+测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、dry-run、缺失文件、QR 登录、Web API 和 CLI。
 
-构建飞牛应用：
+构建飞牛原生应用：
 
 ```bash
 bash scripts/build-fnos.sh
 ```
 
-脚本需要 Python 3 和 [fnpack](https://developer.fnnas.com/)。Windows 下 fnpack 默认把文件打成 0666，构建脚本会调用 `scripts/fix-fpk-modes.py` 把 `cmd/` 下的脚本改为 0755；`app.tgz` 保持不变，因此 `manifest` 里的校验和仍然有效。
+脚本需要 Python 3、网络和 [fnpack](https://developer.fnnas.com/)。图标已提交在仓库中；只有缺失时才会调用 `scripts/make_icons.py`（需要 Pillow）。Windows 下 fnpack 默认把文件打成 0666，构建脚本会调用 `scripts/fix-fpk-modes.py` 把 `cmd/` 下的脚本改为 0755；`app.tgz` 保持不变，因此 `manifest` 里的校验和仍然有效。
 
 ## 目录结构
 
@@ -307,12 +302,14 @@ src/wy_music_cloud/
 ├── session.py      # 会话持久化
 ├── login.py        # 扫码 / 手机号登录
 ├── daemon.py       # 轮询循环
-└── config.py       # YAML + 环境变量配置
-deploy/docker/      # Dockerfile、entrypoint
-deploy/fnos/        # 飞牛应用工程（manifest、wizard、生命周期脚本、compose）
-scripts/            # 图标生成、fpk 构建与权限修复
-docs/               # 协议说明、飞牛部署指南
-tests/              # pytest
+├── config.py       # YAML + 环境变量配置
+├── web.py          # Web UI WSGI 后端 / API
+└── webui/          # 内置前端（HTML/CSS/JS）
+deploy/fnos/wy-music-cloud/  # 原生 fnOS 应用工程（manifest、wizard、生命周期脚本、离线依赖）
+deploy/docker/               # 可选 Dockerfile、entrypoint
+scripts/                     # 图标生成、fpk 构建与权限修复
+docs/                        # 协议说明、飞牛部署指南
+tests/                       # pytest
 ```
 
 ## 参考

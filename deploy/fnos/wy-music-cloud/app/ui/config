@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "wy-music-cloud.main": {
+      "title": "网易云音乐云盘同步",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/wy-music-cloud",
+      "gatewaySocket": "app.sock",
+      "url": "/app/wy-music-cloud/",
+      "allUsers": false
+    }
+  }
+}

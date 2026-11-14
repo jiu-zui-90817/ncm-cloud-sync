@@ -4,7 +4,7 @@
     "items": [
       {
         "type": "tips",
-        "helpText": "Docker 数据卷 wy-music-cloud-data 会保留，重新安装后可继续使用。如需彻底删除，请手动执行 docker volume rm wy-music-cloud-data。"
+        "helpText": "卸载只删除程序，登录状态、同步记录和日志会保留在应用数据目录中，重新安装后可继续使用。"
       }
     ]
   }
