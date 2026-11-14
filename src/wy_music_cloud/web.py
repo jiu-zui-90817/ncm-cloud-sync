@@ -12,9 +12,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
-from wsgiref.types import StartResponse
+
+if TYPE_CHECKING:
+    from wsgiref.types import StartResponse
+else:  # wsgiref.types 只在 Python 3.11+ 存在
+    StartResponse = Any
 
 from . import __version__
 from .client import CloudClient

@@ -29,28 +29,28 @@ def is_excluded(name: str, patterns: Iterable[str]) -> bool:
 
 def _walk(directory: Path, extensions: set[str], exclude: tuple[str, ...]) -> Iterator[AudioFile]:
     try:
-        entries = os.scandir(directory)
+        with os.scandir(directory) as iterator:
+            entries = sorted(iterator, key=lambda item: item.name)
     except OSError as exc:
         logger.warning("无法读取目录 %s: %s", directory, exc)
         return
-    with entries:
-        for entry in entries:
-            name = entry.name
-            if is_excluded(name, exclude):
+    for entry in entries:
+        name = entry.name
+        if is_excluded(name, exclude):
+            continue
+        try:
+            if entry.is_dir(follow_symlinks=False):
+                yield from _walk(Path(entry.path), extensions, exclude)
                 continue
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    yield from _walk(Path(entry.path), extensions, exclude)
-                    continue
-                if not entry.is_file(follow_symlinks=False):
-                    continue
-                ext = Path(name).suffix.lower().lstrip(".")
-                if ext not in extensions:
-                    continue
-                stat = entry.stat(follow_symlinks=False)
-                yield AudioFile(Path(entry.path), stat.st_size, stat.st_mtime_ns)
-            except OSError as exc:
-                logger.warning("跳过无法访问的条目 %s: %s", entry.path, exc)
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            ext = Path(name).suffix.lower().lstrip(".")
+            if ext not in extensions:
+                continue
+            stat = entry.stat(follow_symlinks=False)
+            yield AudioFile(Path(entry.path), stat.st_size, stat.st_mtime_ns)
+        except OSError as exc:
+            logger.warning("跳过无法访问的条目 %s: %s", entry.path, exc)
 
 
 def scan(
