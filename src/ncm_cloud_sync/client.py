@@ -703,7 +703,7 @@ class CloudClient:
             "raw": body,
         }
 
-    def preflight(self, index: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    def preflight(self, index: dict[str, Any] | None = None) -> dict[str, Any]:
         """上传前检查登录态与上传查重接口，失败时抛异常。
 
         只调用只读接口：login_status / check_upload。不能调用 whale_alloc，
@@ -713,13 +713,17 @@ class CloudClient:
         probe_md5 = "0" * 32
         probe_size = 1024
         for md5, info in (index or {}).items():
-            if md5:
-                probe_md5 = str(md5)
+            if not md5:
+                continue
+            probe_md5 = str(md5)
+            # cloud_song_md5_map() 的 value 是 songId（int），而
+            # cloud_song_index() 的 value 才是带 size 的 dict，两种都要兼容。
+            if isinstance(info, dict):
                 try:
                     probe_size = int(info.get("size") or probe_size)
                 except (TypeError, ValueError):
                     probe_size = 1024
-                break
+            break
         check = self.check_upload(probe_md5, probe_size, "mp3")
         return {
             "user_id": profile.get("userId") or profile.get("id"),

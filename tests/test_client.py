@@ -354,6 +354,11 @@ def test_preflight_checks_login_and_upload_check(monkeypatch) -> None:
     assert result["need_upload"] is False
     assert calls == [("abc", 123, "mp3")]
 
+    # cloud_song_md5_map() 返回 md5 -> songId(int)，也必须能预检。
+    result = client.preflight({"def": 1954223039})
+    assert result["probe_md5"] == "def"
+    assert calls[-1] == ("def", 1024, "mp3")
+
 
 def test_post_json_retries_5xx(monkeypatch) -> None:
     attempts = {"n": 0}
