@@ -90,6 +90,7 @@ class Config:
     exclude_dirs: tuple[Path, ...] = ()
     auto_sync: bool = True
     notify_on: str = "always"
+    notify_empty: bool = False
     notify_channels: tuple[dict[str, Any], ...] = ()
     log_level: str = "INFO"
     config_path: Path | None = None
@@ -135,6 +136,7 @@ class Config:
             "exclude_dirs": [str(path) for path in self.exclude_dirs],
             "auto_sync": self.auto_sync,
             "notify_on": self.notify_on,
+            "notify_empty": self.notify_empty,
             "notify_channels": mask_channels(self.notify_channels),
             "log_level": self.log_level,
         }
@@ -190,6 +192,8 @@ class Config:
             values["auto_sync"] = parse_bool(raw["auto_sync"], True)
         if "notify_on" in raw:
             values["notify_on"] = str(raw["notify_on"]).strip().lower()
+        if "notify_empty" in raw:
+            values["notify_empty"] = parse_bool(raw["notify_empty"], False)
         if "notify_channels" in raw:
             values["notify_channels"] = tuple(normalize_channels(raw["notify_channels"]))
         if "log_level" in raw:
@@ -296,6 +300,9 @@ class Config:
         notify_on = text("NCM_CLOUD_SYNC_NOTIFY_ON")
         if notify_on:
             values["notify_on"] = notify_on.lower()
+        notify_empty = text("NCM_CLOUD_SYNC_NOTIFY_EMPTY")
+        if notify_empty is not None:
+            values["notify_empty"] = parse_bool(notify_empty, False)
         notify_channels = text("NCM_CLOUD_SYNC_NOTIFY_CHANNELS")
         if notify_channels:
             try:

@@ -1256,7 +1256,8 @@ body.modal-open {
 
 .run-item-kind.kind-cloud_only,
 .run-item-kind.kind-to_upload,
-.run-item-kind.kind-pending {
+.run-item-kind.kind-pending,
+.run-item-kind.kind-moved {
   background: rgba(37, 99, 235, 0.1);
   color: #1d4ed8;
 }

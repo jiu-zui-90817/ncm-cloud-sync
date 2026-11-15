@@ -393,6 +393,7 @@
     el("autoSync").checked = settings.auto_sync !== false;
     el("logLevel").value = settings.log_level || "INFO";
     el("notifyOn").value = settings.notify_on || "always";
+    el("notifyEmpty").checked = settings.notify_empty === true;
     el("intervalLabel").textContent = formatInterval(settings.interval || status.config.interval);
   }
 
@@ -996,7 +997,7 @@
       type: type,
       name: meta.label || type,
       enabled: true,
-      config: {}
+      config: type === "dingtalk" ? { keyword: "网易云" } : {}
     });
     state.notifyDirty = true;
     renderNotifications();
@@ -1187,6 +1188,7 @@
     permission: "无权限",
     ignored: "已忽略",
     missing: "本地缺失",
+    moved: "已移动",
     deferred: "待续",
     to_upload: "待上传",
     cloud_only: "云端独有",
@@ -1281,7 +1283,7 @@
     el("runDetailSummary").textContent = (run.started_at ? formatRunTime(run.started_at) + " · " : "") + runSummaryText(run, stats);
     var chips = el("runDetailChips");
     chips.textContent = "";
-    var order = ["all", "uploaded", "linked", "skipped_remote", "skipped_local", "planned", "failed", "permission", "ignored", "missing", "deferred", "to_upload", "cloud_only", "duplicate_local"];
+    var order = ["all", "uploaded", "linked", "skipped_remote", "skipped_local", "planned", "failed", "permission", "ignored", "missing", "moved", "deferred", "to_upload", "cloud_only", "duplicate_local"];
     var counts = detail.counts || {};
     var allCount = Object.keys(counts).reduce(function (sum, key) {
       return sum + (counts[key] || 0);
@@ -1537,6 +1539,7 @@
       auto_sync: el("autoSync").checked,
       log_level: el("logLevel").value,
       notify_on: el("notifyOn").value,
+      notify_empty: el("notifyEmpty").checked,
       notifications: state.notifications
     };
     api("/api/settings", { method: "PUT", body: payload }).then(function () {
@@ -1661,6 +1664,10 @@
     el("notifyList").addEventListener("change", onNotifyInput);
     el("notifyList").addEventListener("click", onNotifyClick);
     el("notifyOn").addEventListener("change", function () {
+      state.notifyDirty = true;
+      el("notifyStatus").textContent = "有未保存的修改";
+    });
+    el("notifyEmpty").addEventListener("change", function () {
       state.notifyDirty = true;
       el("notifyStatus").textContent = "有未保存的修改";
     });

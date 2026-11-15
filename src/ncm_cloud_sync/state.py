@@ -431,6 +431,13 @@ class StateStore:
         )
         self.conn.commit()
 
+    def mark_moved(self, path: str | Path, moved_to: str | Path) -> None:
+        self.conn.execute(
+            "UPDATE files SET status = 'moved', last_error = ?, updated_at = ? WHERE path = ?",
+            (f"已移动到 {moved_to}"[:2000], utc_now(), str(path)),
+        )
+        self.conn.commit()
+
     def mark_ignored(self, path: str | Path, reason: str = "") -> None:
         self.conn.execute(
             "UPDATE files SET status = 'ignored', last_error = ?, updated_at = ? WHERE path = ?",

@@ -116,6 +116,8 @@ def normalize_channels(value: Any) -> list[dict[str, Any]]:
             field_value = _text(raw_config.get(field))
             if field_value:
                 config[field] = field_value
+        if channel_type == "dingtalk" and not config.get("keyword"):
+            config["keyword"] = "网易云"
         enabled = bool(item.get("enabled", True))
         label = _text(item.get("name")) or TYPE_LABELS[channel_type]
         if enabled:
@@ -344,14 +346,20 @@ def _send_smtp(config: dict[str, Any], title: str, content: str, label: str) -> 
 
 
 def send_test(channel: dict[str, Any]) -> None:
-    send_channel(channel, "网易云云盘同步 · 测试通知", "这是一条测试通知，收到即表示通知渠道配置可用。")
+    send_channel(channel, "网易云云盘任务 · 测试通知", "这是一条测试通知，收到即表示通知渠道配置可用。")
 
 
 def _stat(stats: Any, name: str, default: Any = 0) -> Any:
     return getattr(stats, name, default)
 
 
-def notify_run(channels: Any, notify_on: str, stats: Any, error: str | None = None) -> list[dict[str, Any]]:
+def notify_run(
+    channels: Any,
+    notify_on: str,
+    stats: Any,
+    error: str | None = None,
+    notify_empty: bool = False,
+) -> list[dict[str, Any]]:
     try:
         normalized = normalize_channels(channels)
     except ValueError as exc:
@@ -376,16 +384,19 @@ def notify_run(channels: Any, notify_on: str, stats: Any, error: str | None = No
         return []
     if mode == "success" and event != "success":
         return []
+    uploaded = int(_stat(stats, "uploaded", 0) or 0)
+    linked = int(_stat(stats, "linked", 0) or 0)
+    if event == "success" and uploaded + linked == 0 and not notify_empty:
+        return []
 
     titles = {
-        "success": "网易云云盘同步完成",
-        "failure": "网易云云盘同步有失败",
-        "paused": "网易云云盘同步已暂停",
-        "stopped": "网易云云盘同步已终止",
+        "success": "网易云云盘任务完成",
+        "failure": "网易云云盘任务有失败",
+        "paused": "网易云云盘任务已暂停",
+        "stopped": "网易云云盘任务已终止",
     }
     title = titles[event]
     scanned = int(_stat(stats, "scanned", 0) or 0)
-    uploaded = int(_stat(stats, "uploaded", 0) or 0)
     skipped = int(_stat(stats, "skipped", 0) or 0)
     permission = int(_stat(stats, "permission_denied", 0) or 0)
     deferred = int(_stat(stats, "deferred", 0) or 0)
@@ -395,6 +406,8 @@ def notify_run(channels: Any, notify_on: str, stats: Any, error: str | None = No
     lines = [
         f"扫描 {scanned} 首，上传 {uploaded} 首，跳过 {skipped} 首，失败 {failed} 首。",
     ]
+    if linked:
+        lines.append(f"其中 {linked} 首无需上传，已补建云盘条目。")
     if permission:
         lines.append(f"其中无权限 {permission} 首，请在应用中心检查音乐目录权限。")
     if missing:

@@ -60,6 +60,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "exclude_dirs": [],
     "auto_sync": True,
     "notify_on": "always",
+    "notify_empty": False,
     "notifications": [],
 }
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
@@ -263,6 +264,7 @@ class SettingsStore:
         data["auto_sync"] = _as_bool(raw.get("auto_sync"), True)
         notify_on = str(raw.get("notify_on") or "always").lower()
         data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
+        data["notify_empty"] = _as_bool(raw.get("notify_empty"), False)
         try:
             data["notifications"] = notify.normalize_channels(raw.get("notifications"))
         except ValueError as exc:
@@ -285,6 +287,7 @@ class SettingsStore:
         if notify_on not in {"always", "failure", "success", "never"}:
             raise ValueError("通知时机必须是 always/failure/success/never")
         data["notify_on"] = notify_on
+        data["notify_empty"] = _as_bool(payload.get("notify_empty"), False)
         data["notifications"] = notify.normalize_channels(payload.get("notifications") or [])
         level = str(payload.get("log_level") or "INFO").upper()
         if level not in ALLOWED_LOG_LEVELS:
@@ -316,6 +319,7 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
     notify_on = str(settings.get("notify_on") or config.notify_on).lower()
     if notify_on in {"always", "failure", "success", "never"}:
         config.notify_on = notify_on
+    config.notify_empty = bool(settings.get("notify_empty", config.notify_empty))
     config.notify_channels = tuple(settings.get("notifications") or [])
     level = str(settings.get("log_level") or config.log_level).upper()
     if level in ALLOWED_LOG_LEVELS:
@@ -337,6 +341,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["exclude_dirs"] = [str(path) for path in config.exclude_dirs]
     settings["auto_sync"] = config.auto_sync
     settings["notify_on"] = config.notify_on
+    settings["notify_empty"] = config.notify_empty
     settings["notifications"] = list(config.notify_channels)
     settings["log_level"] = config.log_level
     return settings
@@ -676,6 +681,7 @@ class SyncManager:
                         self.config.notify_on,
                         stats or SyncStats(),
                         self._error,
+                        notify_empty=self.config.notify_empty,
                     )
             except Exception:
                 logger.warning("同步结果通知发送失败", exc_info=True)
@@ -1140,6 +1146,7 @@ class WebApp:
             "exclude_dirs": [str(path) for path in self.config.exclude_dirs],
             "auto_sync": self.config.auto_sync,
             "notify_on": self.config.notify_on,
+            "notify_empty": self.config.notify_empty,
             "notifications": list(self.config.notify_channels),
             "log_level": self.config.log_level,
             "settings_path": str(self.settings.path),

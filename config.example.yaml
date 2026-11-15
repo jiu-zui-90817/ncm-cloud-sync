@@ -73,6 +73,9 @@ auto_sync: true
 # 同步结果通知时机：always / failure / success / never。
 notify_on: always
 
+# 空跑（没有上传或补建文件）时也通知；失败、暂停、终止不受影响。
+notify_empty: false
+
 # 通知渠道。enabled=false 可先保存配置但不发送。
 # 支持 telegram / bark / ntfy / gotify / discord / slack / dingtalk / serverchan /
 # pushplus / pushover / pushdeer / webhook / smtp。

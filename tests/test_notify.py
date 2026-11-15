@@ -59,7 +59,7 @@ def test_notify_run_filters_by_result(monkeypatch: pytest.MonkeyPatch) -> None:
     paused = SimpleNamespace(failed=0, paused=True, stopped=False, scanned=3, uploaded=1, permission_denied=0)
 
     assert len(notify.notify_run(channels, "always", ok)) == 1
-    assert sent[-1][1].endswith("同步完成")
+    assert sent[-1][1].endswith("任务完成")
     assert notify.notify_run(channels, "failure", ok) == []
     assert len(notify.notify_run(channels, "failure", bad)) == 1
     assert "有失败" in sent[-1][1]
@@ -81,6 +81,33 @@ def test_notify_run_filters_by_result(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert len(notify.notify_run(channels, "failure", preflight_failed)) == 1
     assert "有失败" in sent[-1][1]
+
+
+def test_notify_run_skips_empty_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[str] = []
+    monkeypatch.setattr(notify, "send_channel", lambda channel, title, content: sent.append(title))
+    channels = [{"type": "webhook", "config": {"url": "https://example.com/hook"}}]
+    empty = SimpleNamespace(
+        failed=0, paused=False, stopped=False, scanned=3, uploaded=0, linked=0, permission_denied=0
+    )
+    assert notify.notify_run(channels, "always", empty) == []
+    assert sent == []
+    assert len(notify.notify_run(channels, "always", empty, notify_empty=True)) == 1
+    assert sent == ["网易云云盘任务完成"]
+
+
+def test_dingtalk_keyword_defaults_to_netease() -> None:
+    channels = notify.normalize_channels(
+        [
+            {"type": "dingtalk", "config": {"webhook_url": "https://example.com/robot"}},
+            {
+                "type": "dingtalk",
+                "config": {"webhook_url": "https://example.com/robot2", "keyword": "音乐"},
+            },
+        ]
+    )
+    assert channels[0]["config"]["keyword"] == "网易云"
+    assert channels[1]["config"]["keyword"] == "音乐"
 
 
 def test_webhook_payload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +244,7 @@ def test_notify_run_accepts_tuple_channels(monkeypatch: pytest.MonkeyPatch) -> N
     results = notify.notify_run(
         ({"id": "abc", "type": "bark", "config": {"url": "https://api.day.app/abc"}},),
         "always",
-        SimpleNamespace(),
+        SimpleNamespace(uploaded=1),
     )
     assert sent == ["abc"]
     assert results == [{"id": "abc", "type": "bark", "ok": True, "error": ""}]

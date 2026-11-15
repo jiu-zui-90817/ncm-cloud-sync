@@ -20,7 +20,7 @@
 - **统计明细**：已上传、待处理、本地缺失、跳过/重复都可以点开查看逐文件列表。
 - **权限体检**：检查应用账号能否读取音乐目录，列出无权限的文件和目录示例，并生成 `setfacl` 修复命令。
 - **云盘容量**：账号卡显示已用 / 总量 / 剩余和占用比例；上传前校验剩余空间。
-- **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉、Server酱、PushPlus、Pushover、PushDeer、Webhook 和 SMTP。
+- **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉、Server酱、PushPlus、Pushover、PushDeer、Webhook 和 SMTP；默认只在有上传或补建时通知，空跑可单独开启。
 - **自动同步开关**：可以关闭后台自动同步，只保留手动执行。
 - **增量同步**：SQLite 记录路径、大小、修改时间和 MD5，文件没变不重复计算、不重复上传。
 - **失败隔离**：单个文件失败只影响它自己，下一轮继续；可以重置失败状态后重试。
@@ -273,6 +273,10 @@ sudo rm -rf /var/apps/ncm-cloud-sync/var
 
 先区分上传和补建：`linked` 表示文件字节已经在网易云对象存储，程序只补建云盘条目，不会新增字节。看统计里的“上传”和“补建”是否分开计数。如果云盘数量仍不增加，复制诊断信息和日志里的“补建云盘条目成功 / 云盘已有相同内容”行反馈。
 
+**“本地缺失”是什么？文件移动后还会缺失吗**
+
+“本地缺失”记录的是上次同步过、这次扫描不到的本地文件。文件移动或改名后，旧路径会改记为“已移动”，新路径按 MD5 复用原记录，不会再显示缺失，也不会重复上传；只有真正删除的文件才继续标记缺失。标记缺失不会删除云盘里的歌曲。
+
 **云盘有 563 首，为什么任务只扫描到 533 首**
 
 应用只扫描本地音乐目录，不会把云盘里的歌反向拉回本地；云盘 563 首可能包含本地已删除、改名或从其他设备上传的歌。“上次运行”会显示扫描候选数、实际处理数、云盘条目数和本地过滤明细。如果过滤为 0、云盘 563，说明差的 30 首只在云端；如果过滤 30，明细会写出是扩展名、排除目录还是权限问题。
@@ -339,6 +343,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 | `exclude_dirs` | `[]` | 整棵跳过的绝对目录，必须位于某个音乐目录内；Web UI 里叫“排除目录” |
 | `auto_sync` | `true` | 是否启用后台自动同步；`false` 时只手动同步 |
 | `notify_on` | `always` | 通知时机：`always` / `failure` / `success` / `never` |
+| `notify_empty` | `false` | 空跑（没有上传或补建文件）时也通知；失败、暂停、终止不受影响 |
 | `notify_channels` | `[]` | 通知渠道列表，见下文 |
 | `interval` | `3600` | 自动同步间隔（秒） |
 | `rate_limit` | `1.0` | 网易云接口请求的最小间隔（秒）；Web UI 里叫“请求间隔”，0 表示不限速 |
@@ -350,7 +355,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 
 环境变量优先级高于 YAML，低于命令行参数。支持：
 
-`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
+`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_EMPTY`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
 
 `NCM_CLOUD_SYNC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`NCM_CLOUD_SYNC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
 
@@ -366,7 +371,7 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `gotify` | `server`, `token` | 可选 `priority` |
 | `discord` | `webhook_url` | Discord Webhook |
 | `slack` | `webhook_url` | Slack Incoming Webhook |
-| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`keyword` 自定义关键词、`at_mobiles` 被 @ 手机号 |
+| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`keyword` 自定义关键词（默认“网易云”）、`at_mobiles` 被 @ 手机号 |
 | `serverchan` | `sendkey` | Server酱 |
 | `pushplus` | `token` | PushPlus |
 | `pushover` | `token`, `user` | Pushover |
@@ -374,7 +379,9 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `webhook` | `url` | 通用 JSON POST |
 | `smtp` | `host`, `mail_from`, `mail_to` | SMTP 邮件；可选 `port`、`username`、`password`、`security` |
 
-钉钉机器人安全设置：加签填 `secret`；自定义关键词填 `keyword`（多个用逗号分隔，消息不含关键词时程序会自动补上第一个）；IP 地址段白名单要在钉钉侧填 NAS 的出口公网 IP，程序无法代填。钉钉若同时启用关键词和加签，两者都要满足。
+钉钉机器人安全设置：加签填 `secret`；自定义关键词填 `keyword`（多个用逗号分隔，消息不含关键词时程序会自动补上第一个；不填时默认“网易云”）；IP 地址段白名单要在钉钉侧填 NAS 的出口公网 IP，程序无法代填。钉钉若同时启用关键词和加签，两者都要满足。
+
+成功通知默认只在有上传或补建文件时发送；只有跳过或空跑时不推送。失败、暂停、终止仍按 `notify_on` 发送，需要空跑也通知时在通知页勾选或设置 `notify_empty: true`。
 
 通知发送失败只记日志，不会中断同步。`settings.json` 里保存的是渠道原始配置（含 token），权限为 0600，请不要把数据目录交给不可信用户。
 

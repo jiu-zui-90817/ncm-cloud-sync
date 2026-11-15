@@ -273,6 +273,25 @@ def test_missing_file_marked(tmp_path: Path) -> None:
         assert state.get(target).status == "missing"
 
 
+def test_moved_file_not_marked_missing(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    old = music / "a.mp3"
+    new = music / "b.mp3"
+    old.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        old.rename(new)
+        stats = Syncer(config, client, state).run_once()
+        assert stats.missing == 0
+        assert stats.skipped_local == 1
+        assert state.get(old).status == "moved"
+        assert state.get(new).status == "skipped_local"
+        assert client.calls == ["a.mp3"]
+
+
 def test_limit(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

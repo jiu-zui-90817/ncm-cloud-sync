@@ -250,6 +250,7 @@ def test_settings_save_notifications_and_auto_sync(tmp_path: Path) -> None:
             "log_level": "INFO",
             "auto_sync": False,
             "notify_on": "failure",
+            "notify_empty": True,
             "notifications": [
                 {"type": "bark", "name": "手机", "config": {"url": "https://api.day.app/abc"}}
             ],
@@ -259,11 +260,13 @@ def test_settings_save_notifications_and_auto_sync(tmp_path: Path) -> None:
     assert data["ok"] is True
     assert app.config.auto_sync is False
     assert app.config.notify_on == "failure"
+    assert app.config.notify_empty is True
     assert len(app.config.notify_channels) == 1
     assert app.config.notify_channels[0]["type"] == "bark"
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["auto_sync"] is False
     assert saved["notify_on"] == "failure"
+    assert saved["notify_empty"] is True
     assert saved["notifications"][0]["config"]["url"] == "https://api.day.app/abc"
 
 

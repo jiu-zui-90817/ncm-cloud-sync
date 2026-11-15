@@ -909,8 +909,28 @@ class Syncer:
             raise
 
     def _check_missing(self, known: set[str], stats: SyncStats) -> None:
+        known_md5: dict[str, str] = {}
+        for known_path in known:
+            known_record = self.state.get(known_path)
+            if (
+                known_record is not None
+                and known_record.md5
+                and known_record.status in {"uploaded", "skipped_local", "skipped_remote"}
+            ):
+                known_md5.setdefault(str(known_record.md5), known_path)
         for record in list(self.state.missing_candidates(known)):
             if Path(record.path).exists():
+                continue
+            moved_to = known_md5.get(str(record.md5 or ""))
+            if moved_to and moved_to != record.path:
+                self._record(
+                    "moved",
+                    path=record.path,
+                    name=Path(record.path).name,
+                    detail=f"已移动到 {moved_to}",
+                )
+                logger.info("文件已移动，更新旧记录: %s -> %s", record.path, moved_to)
+                self.state.mark_moved(record.path, moved_to)
                 continue
             stats.missing += 1
             self._record(

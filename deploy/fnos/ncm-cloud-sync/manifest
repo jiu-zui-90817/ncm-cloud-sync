@@ -1,5 +1,5 @@
 appname=ncm-cloud-sync
-version=0.3.11
+version=0.3.12
 display_name=NCM 云盘同步
 desc=把本地音乐自动同步到网易云音乐云盘，支持 Web 界面、扫码登录和本地/云端双重去重。
 source=thirdparty
@@ -15,4 +15,4 @@ disable_authorization_path=false
 install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=ncm-cloud-sync.main
-changelog=0.3.11：概览统计卡可查看逐文件明细；运行历史只保留有同步结果或错误的记录；0.3.10：整理文档与更新日志，无功能变更；0.3.9：新增云盘容量显示与上传前容量校验；0.3.8：修复覆盖安装后 Web 服务启动失败；更早版本见 GitHub Releases。
+changelog=0.3.12：空跑默认不通知，可另行开启；通知标题改为“任务”，钉钉默认关键词为“网易云”；文件移动不再标记本地缺失；0.3.11：统计卡可查看逐文件明细，运行历史只保留有结果的记录；0.3.10：整理文档与更新日志，无功能变更；更早版本见 GitHub Releases。

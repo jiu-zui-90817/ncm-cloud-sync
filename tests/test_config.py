@@ -64,6 +64,14 @@ def test_redacted_hides_cookie(tmp_path: Path) -> None:
     assert loaded.redacted()["cookie"] == "***"
 
 
+def test_notify_empty_yaml_and_env(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    config = write_config(tmp_path, music, "notify_empty: true\n")
+    assert Config.load(config, env={}).notify_empty is True
+    assert Config.load(config, env={"NCM_CLOUD_SYNC_NOTIFY_EMPTY": "false"}).notify_empty is False
+
+
 def test_parse_bool() -> None:
     assert parse_bool("yes") is True
     assert parse_bool("off") is False
