@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,46 @@ def test_rate_limit_aborts_run(tmp_path: Path) -> None:
         assert "405" in stats.error
         assert state.get(music / "a.mp3").status == "pending"
         assert len(client.calls) == 1
+
+
+def test_pause_event_pauses_run(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    for name in ("a.mp3", "b.mp3", "c.mp3"):
+        (music / name).write_bytes(name.encode())
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    pause = threading.Event()
+    pause.set()
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state, pause_event=pause).run_once()
+        assert stats.paused is True
+        assert stats.stopped is False
+        assert stats.aborted is True
+        assert stats.scanned == 0
+        assert stats.deferred == 3
+        assert client.calls == []
+        assert "已暂停" in stats.summary()
+
+
+def test_stop_event_stops_run(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    for name in ("a.mp3", "b.mp3"):
+        (music / name).write_bytes(name.encode())
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    stop = threading.Event()
+    stop.set()
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state, stop_event=stop).run_once()
+        assert stats.stopped is True
+        assert stats.paused is False
+        assert stats.aborted is True
+        assert stats.deferred == 2
+        assert "已终止" in stats.error
+        assert "已终止" in stats.summary()
+        assert client.calls == []
 
 
 def test_nos_unavailable_aborts_run(tmp_path: Path) -> None:

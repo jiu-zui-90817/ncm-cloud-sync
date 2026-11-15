@@ -282,31 +282,18 @@ def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     assert captured["object_key"] == f"{NOS_BUCKET}/obj/key"
 
 
-def test_upload_falls_back_to_old_token_when_whale_fails(tmp_path: Path, monkeypatch) -> None:
+def test_upload_does_not_fall_back_to_old_token_when_whale_fails(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "song.mp3"
     path.write_bytes(b"x")
     client = make_client(rate_limit=0)
-    events: list[str] = []
     client.check_upload = lambda *a, **k: {"need_upload": True, "song_id": 0}  # type: ignore[method-assign]
-
     client.whale_alloc = lambda *a, **k: (_ for _ in ()).throw(client_module.UploadError("no whale"))  # type: ignore[method-assign]
-
-    def alloc(md5, name, ext, *, bucket=""):
-        assert bucket == NOS_BUCKET
-        events.append("alloc")
-        return {"objectKey": "obj", "token": "tok", "resourceId": 1}
-
-    client.alloc_token = alloc  # type: ignore[method-assign]
-    client.upload_to_nos = lambda *a, **k: events.append("nos")  # type: ignore[method-assign]
-    captured: dict = {}
-    client.finish_upload = lambda **k: (captured.update(k), 5)[1]  # type: ignore[method-assign]
-    client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
+    client.alloc_token = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not use old token"))  # type: ignore[method-assign]
+    client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not upload"))  # type: ignore[method-assign]
     monkeypatch.setattr(client_module, "read_tags", lambda p: {"title": "晴天"})
 
-    result = client.upload(path, md5="abc")
-    assert result.song_id == 5
-    assert events == ["alloc", "nos", "pub:5"]
-    assert captured["resource_id"] == 1
+    with pytest.raises(client_module.UploadError):
+        client.upload(path, md5="abc")
 
 
 def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:
@@ -636,6 +623,15 @@ def test_rate_limit_code_raises_specific_error() -> None:
         client._weapi("/weapi/nos/token/alloc", {})
     assert info.value.code == 405
     assert "操作频繁" in str(info.value)
+
+
+def test_whale_alloc_maps_rate_limit_code() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": 405, "message": "操作频繁"})
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0, rate_limit=0)
+    with pytest.raises(RateLimitError):
+        client.whale_alloc("abc", "a.mp3")
 
 
 def test_post_json_throttles_requests(monkeypatch) -> None:

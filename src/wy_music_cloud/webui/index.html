@@ -100,6 +100,9 @@
         <div class="actions">
           <button id="syncButton" class="btn primary" type="button">立即同步</button>
           <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
+          <button id="pauseButton" class="btn ghost" type="button" disabled>暂停</button>
+          <button id="stopButton" class="btn ghost" type="button" disabled>终止</button>
+          <button id="resumeButton" class="btn ghost" type="button" disabled>继续</button>
           <button id="refreshButton" class="btn ghost" type="button">刷新状态</button>
           <button id="copyDiagnosticsDashboard" class="btn ghost" type="button">复制诊断</button>
         </div>
@@ -130,6 +133,11 @@
           <label class="field wide">
             <span>音乐目录</span>
             <textarea id="musicDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music"></textarea>
+          </label>
+          <label class="field wide">
+            <span>排除目录</span>
+            <textarea id="excludeDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music/有声书"></textarea>
+            <small class="muted">每行一个绝对路径，必须位于音乐目录内；整棵目录跳过。</small>
           </label>
           <label class="field">
             <span>同步间隔（秒）</span>

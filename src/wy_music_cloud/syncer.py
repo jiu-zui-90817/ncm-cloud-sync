@@ -36,6 +36,8 @@ class SyncStats:
     bytes_uploaded: int = 0
     duration: float = 0.0
     aborted: bool = False
+    paused: bool = False
+    stopped: bool = False
     error: str = ""
 
     @property
@@ -57,7 +59,15 @@ class SyncStats:
             + f"，缺失 {self.missing}，"
             f"上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
-            + (f"；已暂停，剩余 {self.deferred} 首待下次" if self.deferred else "")
+            + (
+                f"；已终止，剩余 {self.deferred} 首待下次"
+                if self.stopped
+                else f"；已暂停，剩余 {self.deferred} 首待下次"
+                if self.paused
+                else f"；已中止，剩余 {self.deferred} 首待下次"
+                if self.deferred
+                else ""
+            )
         )
 
 
@@ -73,6 +83,7 @@ class Syncer:
         limit: int | None = None,
         progress: ProgressCallback | None = None,
         stop_event: Any | None = None,
+        pause_event: Any | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -82,6 +93,7 @@ class Syncer:
         self.limit = limit
         self.progress = progress
         self.stop_event = stop_event
+        self.pause_event = pause_event
 
     def _notify(self, event: str, payload: dict[str, Any]) -> None:
         if self.progress is None:
@@ -94,16 +106,26 @@ class Syncer:
     def _stopped(self) -> bool:
         return bool(self.stop_event and self.stop_event.is_set())
 
+    def _paused(self) -> bool:
+        return bool(self.pause_event and self.pause_event.is_set())
+
     def run_once(self) -> SyncStats:
         started = time.monotonic()
         stats = SyncStats()
         run_id = self.state.start_run()
         logger.info("开始扫描: %s", ", ".join(str(item) for item in self.config.music_dirs))
+        if self.config.exclude_dirs:
+            logger.info(
+                "排除目录 %d 个: %s",
+                len(self.config.exclude_dirs),
+                ", ".join(str(item) for item in self.config.exclude_dirs),
+            )
         files = list(
             scan(
                 self.config.music_dirs,
                 self.config.extensions,
                 self.config.exclude,
+                self.config.exclude_dirs,
             )
         )
         known = {str(item.path) for item in files}
@@ -113,6 +135,17 @@ class Syncer:
             for audio in files:
                 if self._stopped():
                     stats.aborted = True
+                    stats.stopped = True
+                    stats.deferred = max(0, len(files) - processed)
+                    stats.error = f"已终止本次同步，剩余 {stats.deferred} 首待下次。"
+                    logger.warning("收到终止请求，本次同步已终止，剩余 %d 首", stats.deferred)
+                    break
+                if self._paused():
+                    stats.aborted = True
+                    stats.paused = True
+                    stats.deferred = max(0, len(files) - processed)
+                    stats.error = f"已暂停本次同步，剩余 {stats.deferred} 首待下次。"
+                    logger.info("收到暂停请求，本次同步已暂停，剩余 %d 首", stats.deferred)
                     break
                 if self.limit is not None and processed >= self.limit:
                     logger.info("已达到 --limit %d，提前结束", self.limit)
@@ -126,6 +159,7 @@ class Syncer:
                     raise
                 except RateLimitError as exc:
                     stats.aborted = True
+                    stats.paused = True
                     stats.deferred = max(0, len(files) - processed + 1)
                     stats.error = f"网易云限流：{exc}。本次同步已暂停，稍后会自动继续。"
                     logger.warning("触发网易云限流，本次同步暂停: %s", exc)
@@ -137,6 +171,7 @@ class Syncer:
                     break
                 except NosUnavailableError as exc:
                     stats.aborted = True
+                    stats.paused = True
                     stats.deferred = max(0, len(files) - processed + 1)
                     stats.error = (
                         f"无法连接网易云上传节点：{exc}。"

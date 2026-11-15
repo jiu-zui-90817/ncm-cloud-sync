@@ -27,7 +27,24 @@ def is_excluded(name: str, patterns: Iterable[str]) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
-def _walk(directory: Path, extensions: set[str], exclude: tuple[str, ...]) -> Iterator[AudioFile]:
+def _path_key(path: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _path_is_excluded(path: str | Path, excluded: tuple[str, ...]) -> bool:
+    key = _path_key(path)
+    for root in excluded:
+        if key == root or key.startswith(root + os.sep):
+            return True
+    return False
+
+
+def _walk(
+    directory: Path,
+    extensions: set[str],
+    exclude: tuple[str, ...],
+    exclude_dirs: tuple[str, ...],
+) -> Iterator[AudioFile]:
     try:
         with os.scandir(directory) as iterator:
             entries = sorted(iterator, key=lambda item: item.name)
@@ -40,7 +57,9 @@ def _walk(directory: Path, extensions: set[str], exclude: tuple[str, ...]) -> It
             continue
         try:
             if entry.is_dir(follow_symlinks=False):
-                yield from _walk(Path(entry.path), extensions, exclude)
+                if _path_is_excluded(entry.path, exclude_dirs):
+                    continue
+                yield from _walk(Path(entry.path), extensions, exclude, exclude_dirs)
                 continue
             if not entry.is_file(follow_symlinks=False):
                 continue
@@ -57,17 +76,24 @@ def scan(
     music_dirs: Iterable[str | Path],
     extensions: Iterable[str],
     exclude: Iterable[str] = (),
+    exclude_dirs: Iterable[str | Path] = (),
 ) -> Iterator[AudioFile]:
     """递归扫描目录，按扩展名过滤并跳过隐藏/排除项。"""
     ext_set = {item.lower().lstrip(".") for item in extensions}
     exclude_tuple = tuple(exclude)
+    exclude_paths = tuple(
+        _path_key(item) for item in exclude_dirs if str(item).strip()
+    )
     seen: set[str] = set()
     for root in music_dirs:
         root_path = Path(root)
         if not root_path.is_dir():
             logger.warning("音乐目录不存在，已跳过: %s", root_path)
             continue
-        for audio in _walk(root_path, ext_set, exclude_tuple):
+        if _path_is_excluded(root_path, exclude_paths):
+            logger.info("音乐目录位于排除目录内，已跳过: %s", root_path)
+            continue
+        for audio in _walk(root_path, ext_set, exclude_tuple, exclude_paths):
             key = str(audio.path)
             if key in seen:
                 continue

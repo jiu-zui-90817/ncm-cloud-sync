@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from wy_music_cloud.config import Config
-from wy_music_cloud.session import load_session
+from wy_music_cloud.session import load_session, save_session
 from wy_music_cloud.web import (
     LoginFlow,
     SessionService,
@@ -95,6 +95,9 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["logged_in"] is False
     assert data["stats"]["total"] == 0
     assert data["settings"]["music_dirs"] == [str(app.config.music_dirs[0])]
+    assert data["settings"]["exclude_dirs"] == []
+    assert data["sync"]["state"] == "idle"
+    assert data["sync"]["can_pause"] is False
     status, headers, _ = call(app, "/")
     assert status == "200 OK"
     assert headers["Content-Type"].startswith("text/html")
@@ -121,12 +124,15 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     music = tmp_path / "music2"
     music.mkdir()
+    excluded = music / "有声书"
+    excluded.mkdir()
     status, _, data = call(
         app,
         "/api/settings",
         method="PUT",
         body={
             "music_dirs": [str(music)],
+            "exclude_dirs": [str(excluded)],
             "interval": 300,
             "rate_limit": 2.5,
             "dry_run": True,
@@ -139,8 +145,10 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert app.config.interval == 300
     assert app.config.rate_limit == 2.5
     assert app.config.dry_run is True
+    assert app.config.exclude_dirs == (excluded.resolve(),)
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["music_dirs"] == [str(music)]
+    assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
     assert saved["log_level"] == "DEBUG"
 
@@ -155,6 +163,16 @@ def test_settings_reject_missing_directory(tmp_path: Path) -> None:
     )
     assert status == "400 Bad Request"
     assert "不存在" in data["error"]
+
+
+def test_sync_controls_return_conflict_when_idle(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    save_session(app.config.session_path, {"MUSIC_U": "token", "__csrf": "csrf"})
+    for path in ("/api/sync/pause", "/api/sync/stop", "/api/sync/resume"):
+        status, _, data = call(app, path, method="POST")
+        assert status == "409 Conflict"
+        assert data["ok"] is False
+        assert data["status"]["state"] == "idle"
 
 
 def test_qr_svg_contains_path() -> None:
@@ -351,3 +369,7 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert "copyDiagnosticsButton" in html
     assert "statPermission" in html
     assert "rateLimit" in html
+    assert "excludeDirs" in html
+    assert "pauseButton" in html
+    assert "stopButton" in html
+    assert "resumeButton" in html

@@ -56,6 +56,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "rate_limit": 1.0,
     "dry_run": False,
     "log_level": "INFO",
+    "exclude_dirs": [],
 }
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 STATIC_FILES = {
@@ -132,6 +133,45 @@ def normalize_music_dirs(values: Any) -> list[str]:
     return result
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def normalize_exclude_dirs(values: Any, music_dirs: list[str]) -> list[str]:
+    if values is None:
+        values = []
+    if not isinstance(values, list):
+        raise ValueError("exclude_dirs 必须是数组")
+    roots = [Path(str(item)).expanduser().resolve() for item in music_dirs]
+    result: list[str] = []
+    for raw in values:
+        text = str(raw).strip()
+        if not text:
+            continue
+        if "\x00" in text or "\n" in text or "\r" in text:
+            raise ValueError("排除目录包含非法字符")
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            raise ValueError(f"排除目录必须是绝对路径: {text}")
+        path = path.resolve()
+        if path in roots:
+            raise ValueError(f"不能排除整个音乐根目录: {path}")
+        if not any(_is_within(path, root) for root in roots):
+            raise ValueError(f"排除目录必须位于某个音乐目录内: {path}")
+        if not path.is_dir():
+            raise ValueError(f"排除目录不存在: {path}")
+        if not os.access(path, os.R_OK):
+            raise ValueError(f"排除目录不可读: {path}")
+        item = str(path)
+        if item not in result:
+            result.append(item)
+    return result
+
+
 def make_qr_svg(text: str) -> str:
     try:
         import qrcode
@@ -205,6 +245,13 @@ class SettingsStore:
             data["rate_limit"] = _as_float(raw.get("rate_limit", data["rate_limit"]), 1.0, 0.0, 10.0)
         except ValueError:
             data["rate_limit"] = 1.0
+        stored_excludes = raw.get("exclude_dirs")
+        if isinstance(stored_excludes, list):
+            data["exclude_dirs"] = [
+                str(item).strip()
+                for item in stored_excludes
+                if str(item).strip() and Path(str(item)).expanduser().is_absolute()
+            ]
         data["dry_run"] = _as_bool(raw.get("dry_run"), False)
         level = str(raw.get("log_level") or data["log_level"]).upper()
         data["log_level"] = level if level in ALLOWED_LOG_LEVELS else "INFO"
@@ -215,6 +262,9 @@ class SettingsStore:
         data["music_dirs"] = normalize_music_dirs(payload.get("music_dirs") or [])
         data["interval"] = _as_int(payload.get("interval", 3600), 3600, 60, 86400)
         data["rate_limit"] = _as_float(payload.get("rate_limit", 1.0), 1.0, 0.0, 10.0)
+        data["exclude_dirs"] = normalize_exclude_dirs(
+            payload.get("exclude_dirs") or [], data["music_dirs"]
+        )
         data["dry_run"] = _as_bool(payload.get("dry_run"), False)
         level = str(payload.get("log_level") or "INFO").upper()
         if level not in ALLOWED_LOG_LEVELS:
@@ -237,6 +287,11 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
         config.music_dirs = [Path(str(item)).expanduser() for item in dirs]
     config.interval = int(settings.get("interval", config.interval))
     config.rate_limit = float(settings.get("rate_limit", config.rate_limit))
+    if "exclude_dirs" in settings:
+        config.exclude_dirs = tuple(
+            Path(str(item)).expanduser()
+            for item in (settings.get("exclude_dirs") or [])
+        )
     config.dry_run = bool(settings.get("dry_run", config.dry_run))
     level = str(settings.get("log_level") or config.log_level).upper()
     if level in ALLOWED_LOG_LEVELS:
@@ -255,6 +310,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
         settings["music_dirs"] = candidates
     settings["interval"] = config.interval
     settings["rate_limit"] = config.rate_limit
+    settings["exclude_dirs"] = [str(path) for path in config.exclude_dirs]
     settings["dry_run"] = config.dry_run
     settings["log_level"] = config.log_level
     return settings
@@ -420,8 +476,12 @@ class SyncManager:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._wake = threading.Event()
+        self._pause_run = threading.Event()
+        self._stop_run = threading.Event()
         self._running = False
         self._mode = ""
+        self._state = "idle"
+        self._auto_paused = False
         self._started_at: str | None = None
         self._error: str | None = None
         self._progress: list[dict[str, Any]] = []
@@ -446,9 +506,10 @@ class SyncManager:
             apply_settings(self.config, settings)
         self._wake.set()
         logger.info(
-            "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，dry_run=%s",
+            "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，排除目录 %s 个，dry_run=%s",
             self.config.interval,
             self.config.rate_limit,
+            len(self.config.exclude_dirs),
             self.config.dry_run,
         )
 
@@ -458,7 +519,11 @@ class SyncManager:
         with self._lock:
             if self._running:
                 return False
+            self._pause_run.clear()
+            self._stop_run.clear()
             self._running = True
+            self._state = "running"
+            self._auto_paused = False
             self._mode = source
             self._started_at = utc_now()
             self._error = None
@@ -473,15 +538,47 @@ class SyncManager:
             self._thread.start()
             return True
 
+    def pause(self) -> bool:
+        with self._lock:
+            if not self._running:
+                return False
+            self._pause_run.set()
+            self._auto_paused = True
+            self._state = "pausing"
+            return True
+
+    def stop_current(self) -> bool:
+        with self._lock:
+            if not self._running:
+                return False
+            self._stop_run.set()
+            self._auto_paused = True
+            self._state = "stopping"
+            return True
+
+    def resume(self) -> bool:
+        with self._lock:
+            if self._running or self._state not in ("paused", "stopped"):
+                return False
+            self._auto_paused = False
+        return self.trigger(source="resume")
+
     def status(self) -> dict[str, Any]:
         with self._lock:
             running = self._running
             mode = self._mode
+            state = self._state
             started_at = self._started_at
             error = self._error
             progress = list(self._progress[-8:])
+            auto_paused = self._auto_paused
         return {
             "running": running,
+            "state": state,
+            "auto_paused": auto_paused,
+            "can_pause": running and state == "running",
+            "can_stop": running and state == "running",
+            "can_resume": (not running) and state in ("paused", "stopped"),
             "mode": mode,
             "started_at": started_at,
             "error": error,
@@ -492,6 +589,7 @@ class SyncManager:
 
     def _run(self, *, dry_run: bool, force: bool) -> None:
         started = time.monotonic()
+        stats: SyncStats | None = None
         try:
             cookies, _ = self.sessions.snapshot()
             client = CloudClient(
@@ -509,6 +607,8 @@ class SyncManager:
                         dry_run=dry_run,
                         force=force,
                         progress=self._on_progress,
+                        stop_event=self._stop_run,
+                        pause_event=self._pause_run,
                     )
                     stats = syncer.run_once()
                 from .daemon import write_last_run
@@ -533,6 +633,14 @@ class SyncManager:
             with self._lock:
                 self._running = False
                 self._mode = ""
+                if stats is not None and stats.stopped:
+                    self._state = "stopped"
+                    self._auto_paused = True
+                elif stats is not None and stats.paused:
+                    self._state = "paused"
+                    self._auto_paused = self._pause_run.is_set()
+                else:
+                    self._state = "idle"
                 self._progress.append({"event": "finished", "duration": round(time.monotonic() - started, 1)})
 
     def _on_progress(self, event: str, payload: dict[str, Any]) -> None:
@@ -555,7 +663,9 @@ class SyncManager:
             if self._stop.is_set():
                 break
             try:
-                if self.sessions.has_session():
+                with self._lock:
+                    auto_paused = self._auto_paused
+                if self.sessions.has_session() and not auto_paused:
                     self.trigger(source="schedule")
             except Exception:
                 logger.warning("定时同步触发失败", exc_info=True)
@@ -671,6 +781,27 @@ class WebApp:
                     start_response,
                     "202 Accepted" if started else "409 Conflict",
                     {"started": started, "status": self.sync.status()},
+                )
+            if path == "/api/sync/pause" and method == "POST":
+                ok = self.sync.pause()
+                return self._json(
+                    start_response,
+                    "200 OK" if ok else "409 Conflict",
+                    {"ok": ok, "status": self.sync.status()},
+                )
+            if path == "/api/sync/stop" and method == "POST":
+                ok = self.sync.stop_current()
+                return self._json(
+                    start_response,
+                    "200 OK" if ok else "409 Conflict",
+                    {"ok": ok, "status": self.sync.status()},
+                )
+            if path == "/api/sync/resume" and method == "POST":
+                ok = self.sync.resume()
+                return self._json(
+                    start_response,
+                    "200 OK" if ok else "409 Conflict",
+                    {"ok": ok, "status": self.sync.status()},
                 )
             if path == "/api/sync/status" and method == "GET":
                 return self._json(start_response, "200 OK", self.sync.status())
@@ -799,6 +930,7 @@ class WebApp:
             "music_dirs": [str(path) for path in self.config.music_dirs],
             "interval": self.config.interval,
             "rate_limit": self.config.rate_limit,
+            "exclude_dirs": [str(path) for path in self.config.exclude_dirs],
             "dry_run": self.config.dry_run,
             "log_level": self.config.log_level,
             "settings_path": str(self.settings.path),

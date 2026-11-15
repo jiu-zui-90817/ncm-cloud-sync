@@ -81,6 +81,18 @@
     return value + " 秒";
   }
 
+  function syncStateLabel(value) {
+    var labels = {
+      idle: "空闲",
+      running: "同步中",
+      pausing: "正在暂停",
+      paused: "已暂停",
+      stopping: "正在终止",
+      stopped: "已终止"
+    };
+    return labels[value] || "空闲";
+  }
+
   function basename(path) {
     var parts = String(path || "").split(/[\\/]/);
     return parts[parts.length - 1] || path;
@@ -145,6 +157,7 @@
     }
     var settings = status.settings || {};
     el("musicDirs").value = (settings.music_dirs || []).join("\n");
+    el("excludeDirs").value = (settings.exclude_dirs || []).join("\n");
     el("interval").value = settings.interval || 3600;
     el("rateLimit").value = settings.rate_limit != null ? settings.rate_limit : 1;
     el("dryRun").checked = Boolean(settings.dry_run);
@@ -166,13 +179,22 @@
       if (stats.deferred) {
         text += " · 待续 " + stats.deferred;
       }
+      if (stats.stopped) {
+        text += " · 已终止";
+      } else if (stats.paused) {
+        text += " · 已暂停";
+      }
       el("lastRun").textContent = text;
     }
     el("nextRun").textContent = sync.next_run_at ? formatDate(sync.next_run_at) : "-";
-    el("syncState").textContent = sync.running ? "同步中" : "空闲";
+    var syncState = sync.state || (sync.running ? "running" : "idle");
+    el("syncState").textContent = syncStateLabel(syncState);
     el("syncState").className = "tag" + (sync.running ? " active" : "");
     el("syncButton").disabled = Boolean(sync.running);
     el("dryRunButton").disabled = Boolean(sync.running);
+    el("pauseButton").disabled = !sync.can_pause;
+    el("stopButton").disabled = !sync.can_stop;
+    el("resumeButton").disabled = !sync.can_resume;
     var lastStats = (sync.last_run && sync.last_run.stats) || {};
     var syncError = sync.error || lastStats.error || (sync.last_run && sync.last_run.error);
     if (syncError) {
@@ -208,9 +230,15 @@
     el("statPermission").textContent = lastStats.permission_denied || 0;
     el("statMissing").textContent = stats.missing || 0;
     el("statSkipped").textContent = stats.skipped || 0;
-    el("syncHint").textContent = data.sync.running
-      ? "正在同步，请保持应用运行。"
-      : "同步任务在后台运行，可随时关闭页面。";
+    if (data.sync.running) {
+      el("syncHint").textContent = "正在同步，请保持应用运行。";
+    } else if (data.sync.state === "paused") {
+      el("syncHint").textContent = "同步已暂停，点击继续会重新开始一轮。";
+    } else if (data.sync.state === "stopped") {
+      el("syncHint").textContent = "同步已终止，点击继续会重新开始一轮。";
+    } else {
+      el("syncHint").textContent = "同步任务在后台运行，可随时关闭页面。";
+    }
     renderLastRun(data.sync || {});
     renderSettings(data);
     renderWarnings(data.music_dirs || []);
@@ -409,13 +437,42 @@
     });
   }
 
+  function syncAction(path, message) {
+    api(path, { method: "POST" }).then(function () {
+      showToast(message);
+      loadStatus(false);
+    }).catch(function (error) {
+      showToast(error.message, true);
+      loadStatus(false);
+    });
+  }
+
+  function pauseSync() {
+    syncAction("/api/sync/pause", "正在暂停，当前文件处理完后停止");
+  }
+
+  function stopSync() {
+    if (!window.confirm("终止本次同步？当前文件会处理完，未处理的文件下一轮继续。")) {
+      return;
+    }
+    syncAction("/api/sync/stop", "正在终止同步");
+  }
+
+  function resumeSync() {
+    syncAction("/api/sync/resume", "同步任务已继续");
+  }
+
   function saveSettings(event) {
     event.preventDefault();
     var dirs = el("musicDirs").value.split(/\r?\n/).map(function (line) {
       return line.trim();
     }).filter(Boolean);
+    var excludes = el("excludeDirs").value.split(/\r?\n/).map(function (line) {
+      return line.trim();
+    }).filter(Boolean);
     var payload = {
       music_dirs: dirs,
+      exclude_dirs: excludes,
       interval: Number(el("interval").value),
       rate_limit: Number(el("rateLimit").value),
       dry_run: el("dryRun").checked,
@@ -468,6 +525,9 @@
     });
     el("syncButton").addEventListener("click", function () { syncNow(false); });
     el("dryRunButton").addEventListener("click", function () { syncNow(true); });
+    el("pauseButton").addEventListener("click", pauseSync);
+    el("stopButton").addEventListener("click", stopSync);
+    el("resumeButton").addEventListener("click", resumeSync);
     el("refreshButton").addEventListener("click", function () { loadStatus(false); });
     el("logoutButton").addEventListener("click", logout);
     el("refreshAccount").addEventListener("click", refreshAccount);

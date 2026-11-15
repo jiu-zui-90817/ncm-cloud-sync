@@ -46,7 +46,7 @@
           └─ 成功 ──► uploaded（记录 songId）
 ```
 
-去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；旧 NOS token 仅在鲸鱼 token 申请失败时回退。
+去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。
 
 ## 安装（飞牛 NAS，推荐）
 
@@ -60,7 +60,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.18.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.19.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -106,8 +106,9 @@ bash scripts/build-fnos.sh
 
 - **立即同步**：马上跑一轮真实上传；
 - **演练**：跑一轮只检查、不上传，适合首次确认；
+- **暂停 / 终止 / 继续**：暂停在当前文件处理完后生效；终止会尽快停下；暂停或终止后自动同步也会停止，点“继续”重新开始一轮并恢复自动同步；
 - **刷新**：更新状态统计；
-- **设置**：修改音乐目录、同步间隔、日志级别、演练模式；
+- **设置**：修改音乐目录、排除目录、同步间隔、请求间隔、日志级别、演练模式；
 - **日志**：查看最近运行日志和错误原因。
 
 后台会按 `同步间隔` 自动执行；应用停止后不会运行，重新启动后恢复。第一次建议先点「演练」，确认待上传数量符合预期。
@@ -148,7 +149,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.18** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.19** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -164,11 +165,11 @@ var/
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.2.18，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.2.19，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.2.18，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
+0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.2.19，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 
@@ -176,7 +177,7 @@ var/
 
 **同步时提示 [405] 操作频繁 / 上传接口被限流**
 
-0.2.9 及更早版本在网易云返回 405 后仍会对每个文件继续请求，短时间内大量分配上传 token 会触发风控，最终整库都变成失败。0.2.10 起所有网易云接口请求都受“请求间隔”节流（默认 1 秒），第一次遇到 405 就暂停本轮，把当前文件标记为待处理，其余文件计入“待续”，下一轮自动继续，不再刷出成百上千条失败。遇到 405 时：等 10～30 分钟让风控冷却；在设置里把“请求间隔”调到 1.5～3 秒；不要连续点“立即同步”。页面会显示“本次同步已暂停”和待续数量。
+0.2.9 及更早版本在网易云返回 405 后仍会对每个文件继续请求，短时间内大量分配上传 token 会触发风控，最终整库都变成失败。0.2.10 起所有网易云接口请求都受“请求间隔”节流（默认 1 秒），第一次遇到 405 就暂停本轮，把当前文件标记为待处理，其余文件计入“待续”，下一轮自动继续。0.2.19 起鲸鱼 token 申请失败不再回退旧的 `/weapi/nos/token/alloc`，所以日志里不应再出现这个旧地址；如果仍看到 405，说明是鲸鱼 token 接口本身被限流。遇到 405 时：等 10～30 分钟让风控冷却；在设置里把“请求间隔”调到 1.5～3 秒；不要连续点“立即同步”。页面会显示“本次同步已暂停”和待续数量，也可以点“暂停 / 终止”主动停下。
 
 **很多文件提示没有读取权限 / 失败里“无权限”很多**
 
@@ -237,6 +238,7 @@ wy-music-cloud --music-dir "D:\Music" sync
 | `extensions` | 见示例 | 扫描的音频扩展名 |
 | `upload_extensions` | 见示例 | 允许上传的扩展名；不在列表里的只统计、不上传 |
 | `exclude` | `.*`, `@eaDir`, `#recycle`, `lost+found` | 跳过的目录 / 文件通配符 |
+| `exclude_dirs` | `[]` | 整棵跳过的绝对目录，必须位于某个音乐目录内；Web UI 里叫“排除目录” |
 | `interval` | `3600` | 自动同步间隔（秒） |
 | `rate_limit` | `1.0` | 网易云接口请求的最小间隔（秒）；Web UI 里叫“请求间隔”，0 表示不限速 |
 | `timeout` | `30` | 单次 HTTP 超时（秒） |

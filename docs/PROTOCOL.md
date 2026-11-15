@@ -151,17 +151,7 @@ channel=3&filename=<真实文件名，含扩展名>&md5=<md5>&type=audio&bucket=
 
 这个 token 必须同时用于三处：上传字节用 `data.token` + `data.objectKey`；info/v2 的 `resourceId` 用同一个 `data.resourceId`；info/v2 的 `objectKey` 用 `{bucket}/{data.objectKey}`。不要再用老 `/weapi/nos/token/alloc` 的 `result.resourceId` 去提交 info/v2，这是 0.2.13-0.2.16 一直 400 的关键原因。
 
-老接口只作为鲸鱼 token 申请失败时的回退：
-
-```http
-POST https://music.163.com/weapi/nos/token/alloc
-```
-
-```json
-{"bucket":"jd-musicrep-privatecloud-audio-public","ext":"<实际扩展名>","filename":"<清洗后的文件名>","local":false,"nos_product":3,"type":"audio","md5":"<md5>"}
-```
-
-回退分支返回 `result.resourceId`、`result.objectKey`、`result.token`，仍然只在这一个 token 内配对使用。
+0.2.19 起鲸鱼 token 申请失败**不再回退**旧 `/weapi/nos/token/alloc`：客户端把 405/429 转成 `RateLimitError`，其他失败转成 `UploadError`，由 Syncer 暂停整轮并保留待续。旧接口已经从上传主流程移除，避免它被调用时产生新的 405 风暴。
 
 ## 7. 获取 NOS 上传节点
 
@@ -185,7 +175,7 @@ GET https://wanproxy.127.net/lbs?version=1.0&bucketname=jd-musicrep-privatecloud
 POST http://<host>/<bucket>/<objectKey>
 ```
 
-- `objectKey` 来自第 6 步的鲸鱼 token（或回退 token）；
+- `objectKey` 来自第 6 步的鲸鱼 token；
 - `objectKey` 中的 `/` 要转成 `%2F`；
 - Query：`offset=0&complete=true&version=1.0`；
 - Header `x-nos-token: <token>`；
@@ -193,7 +183,7 @@ POST http://<host>/<bucket>/<objectKey>
 - Header `Content-Type: audio/mpeg`（按实际格式可调整）；
 - Body 是文件原始字节，`Content-Length` 必须准确。
 
-本项目当前按整文件一次 POST；大文件分片可参考 HyPlayer 的 1 MiB 分片和 `context` 续传，但不是 0.2.18 的必要条件。
+本项目当前按整文件一次 POST；大文件分片可参考 HyPlayer 的 1 MiB 分片和 `context` 续传，但不是 0.2.19 的必要条件。
 
 ## 9. 写入云盘信息（原生桌面 eapi，musicupload 域名）
 
@@ -252,7 +242,7 @@ check(eapi, md5,size)                         -> needUpload/songId
        └─ pub/v2 (interface eapi, 201 也算成功)          -> 发布
 ```
 
-鲸鱼 token 申请失败时才回退到老 `/weapi/nos/token/alloc`，后续仍然用这个回退 token 的 `resourceId`/`objectKey` 走 info/v2。
+鲸鱼 token 申请失败时整轮暂停，不再回退老 `/weapi/nos/token/alloc`，未处理文件保留为待续。
 
 ## 12. 常见错误
 
@@ -275,7 +265,9 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 上传前先 `check`，这是最便宜、最有效的去重；
 - 把协议封装在一个 client 模块里，接口变化时只改一处；
 - 保留 `--dry-run`，先用小流量验证；
-- 不要并发上传大量文件，适当 `rate_limit`。
+- 不要并发上传大量文件，适当 `rate_limit`；遇到 405/429 暂停整轮，等冷却后再继续。
+- 0.2.19 起支持在 Web UI 暂停、终止、继续；暂停在当前文件处理完后生效，终止会尽快结束本轮。
+- 不想上传的目录用 `exclude_dirs` 整棵排除，不要靠扩展名或文件名通配符硬凑。
 
 ## 14. 参考
 

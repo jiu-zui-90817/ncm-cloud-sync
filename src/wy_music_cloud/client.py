@@ -651,8 +651,10 @@ class CloudClient:
             check=False,
         )
         code = _as_int(body.get("code"), -1)
+        message = str(body.get("message") or body.get("msg") or body)
+        if code in {405, 429}:
+            raise RateLimitError(message, code=code, url=WHALE_ALLOC_URL)
         if code not in (200, -1):
-            message = body.get("message") or body.get("msg") or body
             raise UploadError(f"鲸鱼上传 token 申请失败: code={code} {message}")
         result = body.get("data")
         if not isinstance(result, dict):
@@ -865,17 +867,14 @@ class CloudClient:
         token: dict[str, Any] | None = None
         if check["need_upload"]:
             # 新版流程先申请鲸鱼 token，再上传字节并用同一个 token 的
-            # resourceId + objectKey 提交 info/v2。老 NOS token 仅作兼容回退。
-            try:
-                token = self.whale_alloc(md5, path.name)
-                logger.info(
-                    "鲸鱼上传 token: resourceId=%s objectKey=%s",
-                    token.get("resourceId"),
-                    token.get("objectKey"),
-                )
-            except (ApiError, UploadError) as exc:
-                logger.warning("鲸鱼上传 token 申请失败，回退到旧 NOS token: %s", exc)
-                token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
+            # resourceId + objectKey 提交 info/v2。旧的 /weapi/nos/token/alloc
+            # 已经不再被 info/v2 接受，而且会触发 405 限流，因此不再回退。
+            token = self.whale_alloc(md5, path.name)
+            logger.info(
+                "鲸鱼上传 token: resourceId=%s objectKey=%s",
+                token.get("resourceId"),
+                token.get("objectKey"),
+            )
             self.upload_to_nos(token, path, md5, ext)
         else:
             # needUpload=false 说明文件字节已在网易云对象存储；原版客户端

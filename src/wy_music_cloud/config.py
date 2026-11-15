@@ -79,12 +79,13 @@ class Config:
     extensions: tuple[str, ...] = DEFAULT_AUDIO_EXTENSIONS
     upload_extensions: tuple[str, ...] = DEFAULT_UPLOAD_EXTENSIONS
     interval: int = 3600
-    rate_limit: float = 0.5
+    rate_limit: float = 1.0
     timeout: float = 30.0
     retries: int = 3
     min_size: int = 0
     max_upload_size: int = 0
     exclude: tuple[str, ...] = (".*", "@eaDir", "#recycle", "lost+found")
+    exclude_dirs: tuple[Path, ...] = ()
     dry_run: bool = False
     log_level: str = "INFO"
     config_path: Path | None = None
@@ -127,6 +128,7 @@ class Config:
             "min_size": self.min_size,
             "max_upload_size": self.max_upload_size,
             "exclude": list(self.exclude),
+            "exclude_dirs": [str(path) for path in self.exclude_dirs],
             "dry_run": self.dry_run,
             "log_level": self.log_level,
         }
@@ -174,6 +176,10 @@ class Config:
                 values[key] = type(getattr(cls, key))(raw[key])
         if "exclude" in raw:
             values["exclude"] = tuple(_as_list(raw["exclude"]))
+        if "exclude_dirs" in raw:
+            values["exclude_dirs"] = tuple(
+                _resolve_path(item, base) for item in _as_list(raw["exclude_dirs"])
+            )
         if "dry_run" in raw:
             values["dry_run"] = parse_bool(raw["dry_run"])
         if "log_level" in raw:
@@ -255,6 +261,11 @@ class Config:
         exclude = text("WY_MUSIC_EXCLUDE")
         if exclude:
             values["exclude"] = tuple(_as_list(exclude))
+        exclude_dirs = text("WY_MUSIC_EXCLUDE_DIRS")
+        if exclude_dirs:
+            values["exclude_dirs"] = tuple(
+                _resolve_path(item, base) for item in _as_list(exclude_dirs)
+            )
         for name, key in (
             ("WY_MUSIC_INTERVAL", "interval"),
             ("WY_MUSIC_RATE_LIMIT", "rate_limit"),
@@ -295,6 +306,9 @@ class Config:
             raise ConfigError("rate_limit 不能为负数")
         if self.retries < 0:
             raise ConfigError("retries 不能为负数")
+        for directory in self.exclude_dirs:
+            if not directory.is_absolute():
+                raise ConfigError(f"排除目录必须是绝对路径: {directory}")
 
     def with_overrides(self, **kwargs: Any) -> "Config":
         return replace(self, **{key: value for key, value in kwargs.items() if value is not None})

@@ -45,6 +45,10 @@ exclude:
   - "#recycle"
   - "lost+found"
 
+# 整棵跳过的目录，绝对路径，必须位于 music_dirs 内。
+exclude_dirs: []
+  # - /music/有声书
+
 # daemon 轮询间隔（秒）。3600 = 每小时。
 interval: 3600
 
