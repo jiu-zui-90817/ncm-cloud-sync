@@ -51,12 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan_cmd.add_argument("--json", action="store_true", help="输出 JSON")
 
     sync = sub.add_parser("sync", help="执行一次同步")
-    sync.add_argument("--dry-run", action="store_true", help="只检查，不真正上传")
     sync.add_argument("--force", action="store_true", help="忽略未变更缓存，重新检查")
     sync.add_argument("--limit", type=int, default=None, help="最多处理 N 个文件，便于试跑")
 
     daemon = sub.add_parser("daemon", help="常驻轮询同步")
-    daemon.add_argument("--dry-run", action="store_true", help="只检查，不真正上传")
     daemon.add_argument("--force", action="store_true", help="忽略未变更缓存")
     daemon.add_argument("--no-run-now", action="store_true", help="启动后先等待一个周期")
 
@@ -191,14 +189,13 @@ def cmd_sync(args: argparse.Namespace, config: Config) -> int:
             config,
             client,
             state,
-            dry_run=args.dry_run or config.dry_run,
             force=args.force,
             limit=args.limit,
         )
         stats = syncer.run_once()
         write_last_run(config.last_run_path, stats)
         print(stats.summary())
-        return 1 if stats.failed else 0
+        return 1 if stats.failed or stats.error else 0
     finally:
         state.close()
         client.close()
@@ -225,7 +222,6 @@ def cmd_daemon(args: argparse.Namespace, config: Config) -> int:
             client,
             state,
             stop,
-            dry_run=args.dry_run or config.dry_run,
             force=args.force,
             run_immediately=not args.no_run_now,
         )

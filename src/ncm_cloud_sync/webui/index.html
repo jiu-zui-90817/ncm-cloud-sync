@@ -109,7 +109,6 @@
           <div class="actions">
             <button id="syncButton" class="btn primary" type="button">立即同步</button>
             <button id="scanOnlyButton" class="btn ghost" type="button">仅扫描</button>
-            <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
             <button id="pauseButton" class="btn ghost" type="button" disabled>暂停</button>
             <button id="stopButton" class="btn ghost" type="button" disabled>终止</button>
             <button id="resumeButton" class="btn ghost" type="button" disabled>继续</button>
@@ -206,10 +205,6 @@
             <label class="check-field wide">
               <input id="autoSync" type="checkbox" checked>
               <span>启用自动同步（关闭后只手动同步，定时任务不再自动启动）</span>
-            </label>
-            <label class="check-field">
-              <input id="dryRun" type="checkbox">
-              <span>默认只演练，不真正上传</span>
             </label>
             <div class="form-actions">
               <button id="saveSettings" class="btn primary" type="submit">保存设置</button>

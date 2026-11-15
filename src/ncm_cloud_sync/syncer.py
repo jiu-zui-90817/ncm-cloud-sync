@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from .client import CloudClient, UploadResult
 from .config import Config
-from .errors import AuthError, NosUnavailableError, RateLimitError
+from .errors import AuthError, NcmSyncError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
 from .scanner import AudioFile, path_is_excluded, scan_with_report
 from .state import StateStore
@@ -26,6 +26,7 @@ class SyncStats:
     scanned: int = 0
     processed: int = 0
     cloud_songs: int = 0
+    preflight_ok: bool = False
     cloud_only: int = 0
     matched: int = 0
     to_upload: int = 0
@@ -40,7 +41,6 @@ class SyncStats:
     linked: int = 0
     skipped_local: int = 0
     skipped_remote: int = 0
-    planned: int = 0
     failed: int = 0
     permission_denied: int = 0
     deferred: int = 0
@@ -95,8 +95,7 @@ class SyncStats:
                     else ""
                 )
             )
-        prefix = "演练：" if self.mode == "dry_run" else ""
-        return prefix + (
+        return (
             f"扫描 {self.scanned}"
             + (
                 f"（实际处理 {self.processed}）"
@@ -135,7 +134,6 @@ class Syncer:
         client: CloudClient,
         state: StateStore,
         *,
-        dry_run: bool = False,
         force: bool = False,
         limit: int | None = None,
         progress: ProgressCallback | None = None,
@@ -146,7 +144,6 @@ class Syncer:
         self.config = config
         self.client = client
         self.state = state
-        self.dry_run = dry_run
         self.scan_only = scan_only
         self.force = force
         self.limit = limit
@@ -155,7 +152,7 @@ class Syncer:
         self.pause_event = pause_event
         self._cloud_md5: dict[str, int] = {}
         self._items: list[dict[str, Any]] = []
-        self.mode = "scan" if scan_only else ("dry_run" if dry_run else "sync")
+        self.mode = "scan" if scan_only else "sync"
 
     def _record(
         self,
@@ -213,8 +210,6 @@ class Syncer:
         return False
 
     def _mark_ignored_excluded(self, known: set[str]) -> int:
-        if self.dry_run:
-            return 0
         count = 0
         for stored in self.state.all_paths():
             if stored in known or not self._under_music_dirs(stored):
@@ -234,6 +229,57 @@ class Syncer:
         if count:
             logger.info("已隐藏 %d 个被排除规则命中的历史记录", count)
         return count
+
+    def _load_cloud(self, stats: SyncStats) -> None:
+        """读取云盘列表；失败是硬错误，不能当作空云盘继续上传。"""
+        self._cloud_md5 = {}
+        loader = getattr(self.client, "cloud_song_md5_map", None)
+        if not callable(loader):
+            raise NcmSyncError("客户端不支持读取云盘列表")
+        try:
+            self._cloud_md5 = dict(loader() or {})
+        except Exception as exc:
+            raise NcmSyncError(f"读取云盘列表失败：{exc}") from exc
+        stats.cloud_songs = int(
+            getattr(self.client, "last_cloud_song_count", len(self._cloud_md5)) or 0
+        )
+        logger.info(
+            "云盘已有 %d 首（%d 个不同 MD5），已用于同步前对账",
+            stats.cloud_songs,
+            len(self._cloud_md5),
+        )
+
+    def _preflight(self, stats: SyncStats) -> None:
+        """上传前检查登录态与上传查重接口；失败抛 NcmSyncError。"""
+        checker = getattr(self.client, "preflight", None)
+        if not callable(checker):
+            stats.preflight_ok = True
+            return
+        try:
+            detail = checker(self._cloud_md5) or {}
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise NcmSyncError(f"上传查重接口不可用：{exc}") from exc
+        stats.preflight_ok = True
+        logger.info(
+            "上传前接口检查通过：userId=%s，云盘 %s 首，查重探针 %s",
+            detail.get("user_id"),
+            detail.get("cloud_songs"),
+            detail.get("probe_md5"),
+        )
+
+    def _abort_run(self, run_id: int, stats: SyncStats, started: float, message: str) -> SyncStats:
+        stats.aborted = True
+        stats.error = message
+        stats.duration = time.monotonic() - started
+        try:
+            self._finish_run(run_id, stats)
+        except Exception:
+            logger.exception("写入运行记录失败")
+        self._notify("done", stats.as_dict())
+        logger.error(message)
+        return stats
 
     def run_once(self) -> SyncStats:
         started = time.monotonic()
@@ -271,23 +317,23 @@ class Syncer:
             report.unreadable,
             report.missing_roots,
         )
-        self._cloud_md5 = {}
-        loader = getattr(self.client, "cloud_song_md5_map", None)
-        if callable(loader):
-            try:
-                self._cloud_md5 = dict(loader() or {})
-                stats.cloud_songs = int(
-                    getattr(self.client, "last_cloud_song_count", len(self._cloud_md5))
-                    or 0
-                )
-            except Exception as exc:
-                logger.warning("读取云盘列表失败，本轮跳过云端对账: %s", exc)
-            else:
-                logger.info(
-                    "云盘已有 %d 首（%d 个不同 MD5），已用于同步前对账",
-                    stats.cloud_songs,
-                    len(self._cloud_md5),
-                )
+        try:
+            self._load_cloud(stats)
+            self._preflight(stats)
+        except Exception as exc:
+            return self._abort_run(run_id, stats, started, f"上传前接口检查失败：{exc}")
+        if self._stopped():
+            stats.stopped = True
+            stats.deferred = len(files)
+            return self._abort_run(
+                run_id, stats, started, f"已终止本次同步，剩余 {stats.deferred} 首待下次。"
+            )
+        if self._paused():
+            stats.paused = True
+            stats.deferred = len(files)
+            return self._abort_run(
+                run_id, stats, started, f"已暂停本次同步，剩余 {stats.deferred} 首待下次。"
+            )
         processed = 0
         try:
             self._mark_ignored_excluded(known)
@@ -329,11 +375,10 @@ class Syncer:
                         detail=f"网易云限流：{exc}",
                     )
                     logger.warning("触发网易云限流，本次同步暂停: %s", exc)
-                    if not self.dry_run:
-                        try:
-                            self.state.mark_pending(audio.path, str(exc))
-                        except Exception:
-                            logger.exception("写入待处理状态时出错: %s", audio.path)
+                    try:
+                        self.state.mark_pending(audio.path, str(exc))
+                    except Exception:
+                        logger.exception("写入待处理状态时出错: %s", audio.path)
                     break
                 except NosUnavailableError as exc:
                     stats.aborted = True
@@ -351,11 +396,10 @@ class Syncer:
                         detail=f"上传节点不可用：{exc}",
                     )
                     logger.warning("无法连接网易云上传节点，本次同步暂停: %s", exc)
-                    if not self.dry_run:
-                        try:
-                            self.state.mark_pending(audio.path, str(exc))
-                        except Exception:
-                            logger.exception("写入待处理状态时出错: %s", audio.path)
+                    try:
+                        self.state.mark_pending(audio.path, str(exc))
+                    except Exception:
+                        logger.exception("写入待处理状态时出错: %s", audio.path)
                     break
                 except PermissionError as exc:
                     stats.failed += 1
@@ -371,14 +415,13 @@ class Syncer:
                         "没有读取权限，跳过: %s（请给应用用户 ncm-cloud-sync 授予该目录读取权限）",
                         audio.path,
                     )
-                    if not self.dry_run:
-                        try:
-                            self.state.mark_failed(
-                                audio.path,
-                                "没有读取权限，请在应用中心授权该目录，或给应用用户 ncm-cloud-sync 读权限",
-                            )
-                        except Exception:
-                            logger.exception("写入失败状态时出错: %s", audio.path)
+                    try:
+                        self.state.mark_failed(
+                            audio.path,
+                            "没有读取权限，请在应用中心授权该目录，或给应用用户 ncm-cloud-sync 读权限",
+                        )
+                    except Exception:
+                        logger.exception("写入失败状态时出错: %s", audio.path)
                 except Exception as exc:
                     stats.failed += 1
                     self._record(
@@ -389,11 +432,10 @@ class Syncer:
                         detail=str(exc) or exc.__class__.__name__,
                     )
                     logger.exception("处理文件失败: %s", audio.path)
-                    if not self.dry_run:
-                        try:
-                            self.state.mark_failed(audio.path, str(exc))
-                        except Exception:
-                            logger.exception("写入失败状态时出错: %s", audio.path)
+                    try:
+                        self.state.mark_failed(audio.path, str(exc))
+                    except Exception:
+                        logger.exception("写入失败状态时出错: %s", audio.path)
             self._check_missing(known, stats)
         except AuthError as exc:
             stats.duration = time.monotonic() - started
@@ -418,9 +460,8 @@ class Syncer:
             stats.up_to_date += 1
             return
 
-        if not self.dry_run:
-            self.state.mark_seen(audio.path, audio.size, audio.mtime_ns)
-            record = self.state.get(audio.path)
+        self.state.mark_seen(audio.path, audio.size, audio.mtime_ns)
+        record = self.state.get(audio.path)
 
         if audio.size < self.config.min_size:
             stats.ignored += 1
@@ -429,8 +470,7 @@ class Syncer:
                 "ignored", path=audio.path, name=audio.path.name, size=audio.size, detail=reason
             )
             logger.info("%s: %s", reason, audio.path)
-            if not self.dry_run:
-                self.state.mark_ignored(audio.path, reason)
+            self.state.mark_ignored(audio.path, reason)
             return
 
         if audio.suffix not in self.config.upload_extensions:
@@ -440,8 +480,7 @@ class Syncer:
                 "ignored", path=audio.path, name=audio.path.name, size=audio.size, detail=reason
             )
             logger.info("%s: %s", reason, audio.path)
-            if not self.dry_run:
-                self.state.mark_ignored(audio.path, reason)
+            self.state.mark_ignored(audio.path, reason)
             return
 
         if self.config.max_upload_size and audio.size > self.config.max_upload_size:
@@ -451,8 +490,7 @@ class Syncer:
                 "failed", path=audio.path, name=audio.path.name, size=audio.size, detail=message
             )
             logger.warning("%s: %s", message, audio.path)
-            if not self.dry_run:
-                self.state.mark_failed(audio.path, message)
+            self.state.mark_failed(audio.path, message)
             return
 
         cached = (
@@ -464,7 +502,7 @@ class Syncer:
             else None
         )
         md5 = cached or file_md5(audio.path)
-        if not self.dry_run and md5 != cached:
+        if md5 != cached:
             self.state.set_md5(audio.path, md5)
 
         canonical = self.state.find_by_md5(md5, exclude_path=str(audio.path))
@@ -478,13 +516,12 @@ class Syncer:
                 detail=f"与本地文件重复：{canonical.path}",
             )
             logger.info("本地重复，跳过: %s -> %s", audio.path, canonical.path)
-            if not self.dry_run:
-                self.state.mark_skipped(
-                    audio.path,
-                    status="skipped_local",
-                    duplicate_of=canonical.path,
-                    song_id=canonical.song_id,
-                )
+            self.state.mark_skipped(
+                audio.path,
+                status="skipped_local",
+                duplicate_of=canonical.path,
+                song_id=canonical.song_id,
+            )
             self._notify(
                 "skip_local",
                 {"path": str(audio.path), "duplicate_of": canonical.path},
@@ -502,26 +539,20 @@ class Syncer:
                 detail=f"云盘已有相同内容（songId={cloud_song_id or '未知'}）",
             )
             logger.info("云盘已有相同内容，跳过: %s -> songId=%s", audio.path, cloud_song_id)
-            if not self.dry_run:
-                self.state.mark_skipped(
-                    audio.path,
-                    status="skipped_remote",
-                    song_id=cloud_song_id,
-                )
+            self.state.mark_skipped(
+                audio.path,
+                status="skipped_remote",
+                song_id=cloud_song_id,
+            )
             self._notify(
                 "skip_remote",
                 {"path": str(audio.path), "song_id": cloud_song_id},
             )
             return
 
-        if not self.dry_run:
-            self.state.mark_uploading(audio.path)
+        self.state.mark_uploading(audio.path)
 
-        result: UploadResult = self.client.upload(
-            audio.path,
-            md5=md5,
-            dry_run=self.dry_run,
-        )
+        result: UploadResult = self.client.upload(audio.path, md5=md5)
 
         if result.reason == "remote_exists":
             stats.skipped_remote += 1
@@ -533,29 +564,15 @@ class Syncer:
                 detail=f"云端已存在（songId={result.song_id or '未知'}）",
             )
             logger.info("云端已存在，跳过: %s", audio.path)
-            if not self.dry_run:
-                self.state.mark_skipped(
-                    audio.path,
-                    status="skipped_remote",
-                    song_id=result.song_id,
-                )
+            self.state.mark_skipped(
+                audio.path,
+                status="skipped_remote",
+                song_id=result.song_id,
+            )
             self._notify(
                 "skip_remote",
                 {"path": str(audio.path), "song_id": result.song_id},
             )
-            return
-
-        if result.reason == "dry_run":
-            stats.planned += 1
-            self._record(
-                "planned",
-                path=audio.path,
-                name=audio.path.name,
-                size=audio.size,
-                detail="演练模式：未实际上传",
-            )
-            logger.info("dry-run：待上传 %s", audio.path)
-            self._notify("planned", {"path": str(audio.path)})
             return
 
         if result.reason == "linked":
@@ -568,12 +585,11 @@ class Syncer:
                 detail=f"补建云盘条目成功（songId={result.song_id or '未知'}）",
             )
             logger.info("补建云盘条目成功: %s -> songId=%s", audio.path, result.song_id)
-            if not self.dry_run:
-                self.state.mark_uploaded(
-                    audio.path,
-                    song_id=result.song_id,
-                    cloud_name=result.cloud_name,
-                )
+            self.state.mark_uploaded(
+                audio.path,
+                song_id=result.song_id,
+                cloud_name=result.cloud_name,
+            )
             self._notify(
                 "linked",
                 {"path": str(audio.path), "song_id": result.song_id},
@@ -590,12 +606,11 @@ class Syncer:
             detail=f"上传成功（songId={result.song_id or '未知'}）",
         )
         logger.info("上传成功: %s -> songId=%s", audio.path, result.song_id)
-        if not self.dry_run:
-            self.state.mark_uploaded(
-                audio.path,
-                song_id=result.song_id,
-                cloud_name=result.cloud_name,
-            )
+        self.state.mark_uploaded(
+            audio.path,
+            song_id=result.song_id,
+            cloud_name=result.cloud_name,
+        )
         self._notify(
             "uploaded",
             {"path": str(audio.path), "song_id": result.song_id, "size": audio.size},
@@ -820,5 +835,4 @@ class Syncer:
                 detail="本地文件已不存在",
             )
             logger.warning("文件已不存在，标记 missing: %s", record.path)
-            if not self.dry_run:
-                self.state.mark_missing(record.path)
+            self.state.mark_missing(record.path)

@@ -54,12 +54,10 @@ validate_log_level() {
 }
 
 write_settings() {
-  local path="$1" music="$2" interval="$3" dry_run="$4" log_level="$5"
-  local bool="false"
-  [ "$dry_run" = "true" ] && bool="true"
+  local path="$1" music="$2" interval="$3" log_level="$4"
   umask 077
-  printf '{\n  "version": 1,\n  "music_dirs": ["%s"],\n  "interval": %s,\n  "dry_run": %s,\n  "log_level": "%s"\n}\n' \
-    "$music" "$interval" "$bool" "$log_level" >"$path"
+  printf '{\n  "version": 1,\n  "music_dirs": ["%s"],\n  "interval": %s,\n  "log_level": "%s"\n}\n' \
+    "$music" "$interval" "$log_level" >"$path"
   chmod 600 "$path"
 }
 
@@ -82,10 +80,9 @@ write_login_hint() {
 
 apply_wizard_settings() {
   local appdir="$1" vardir="$2"
-  local music interval dry_run log_level reason
+  local music interval log_level reason
   music="$(normalize_music_dir "${wizard_music_dir:-/vol1/1000/Music}")"
   interval="${wizard_interval:-3600}"
-  dry_run="${wizard_dry_run:-false}"
   log_level="${wizard_log_level:-INFO}"
 
   if ! reason="$(music_dir_error "$music")"; then
@@ -95,16 +92,15 @@ apply_wizard_settings() {
     fail "音乐目录不可用：$music（$reason）"
   fi
   validate_int "$interval" 60 86400 || fail "同步间隔必须是 60-86400 秒之间的整数"
-  case "$dry_run" in true|false) ;; *) fail "演练模式只能是 true 或 false" ;; esac
   validate_log_level "$log_level" || fail "日志级别只能是 DEBUG/INFO/WARNING/ERROR"
 
   mkdir -p "$vardir/data"
   chmod 700 "$vardir/data" 2>/dev/null || true
   local python
   if python="$(find_python "$appdir" 2>/dev/null)" && [ -n "$python" ]; then
-    "$python" "$COMMON_DIR/settings_merge.py" "$vardir/settings.json" "$music" "$interval" "$dry_run" "$log_level"
+    "$python" "$COMMON_DIR/settings_merge.py" "$vardir/settings.json" "$music" "$interval" "$log_level"
   else
-    write_settings "$vardir/settings.json" "$music" "$interval" "$dry_run" "$log_level"
+    write_settings "$vardir/settings.json" "$music" "$interval" "$log_level"
   fi
   write_login_hint "$vardir" "$appdir"
 }

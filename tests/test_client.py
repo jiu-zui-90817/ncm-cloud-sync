@@ -338,15 +338,21 @@ def test_upload_does_not_fall_back_to_old_token_when_whale_fails(tmp_path: Path,
         client.upload(path, md5="abc")
 
 
-def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:
-    path = tmp_path / "song.mp3"
-    path.write_bytes(b"x")
+def test_preflight_checks_login_and_upload_check(monkeypatch) -> None:
     client = make_client()
-    client.check_upload = lambda *a, **k: {"need_upload": True, "song_id": 0}  # type: ignore[method-assign]
-    client.whale_alloc = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
-    result = client.upload(path, md5="abc", dry_run=True)
-    assert result.uploaded is False
-    assert result.reason == "dry_run"
+    monkeypatch.setattr(client, "login_status", lambda: {"userId": 7})
+    calls = []
+
+    def check_upload(md5, size, ext):
+        calls.append((md5, size, ext))
+        return {"need_upload": False}
+
+    monkeypatch.setattr(client, "check_upload", check_upload)
+    result = client.preflight({"abc": {"size": 123}})
+    assert result["user_id"] == 7
+    assert result["probe_md5"] == "abc"
+    assert result["need_upload"] is False
+    assert calls == [("abc", 123, "mp3")]
 
 
 def test_post_json_retries_5xx(monkeypatch) -> None:

@@ -40,14 +40,14 @@ def test_version_exits_zero() -> None:
         main(["--version"])
     assert excinfo.value.code == 0
 
-def test_config_dry_run_applies_to_sync_and_daemon(tmp_path: Path, monkeypatch) -> None:
+def test_sync_returns_error_and_daemon_has_no_dry_run(tmp_path: Path, monkeypatch) -> None:
     import argparse
     from types import SimpleNamespace
 
     from ncm_cloud_sync import cli
     from ncm_cloud_sync.config import Config
 
-    config = Config(music_dirs=[tmp_path], data_dir=tmp_path / "data", dry_run=True)
+    config = Config(music_dirs=[tmp_path], data_dir=tmp_path / "data")
     captured = {}
 
     class Dummy:
@@ -59,19 +59,21 @@ def test_config_dry_run_applies_to_sync_and_daemon(tmp_path: Path, monkeypatch) 
             captured.update(kwargs)
 
         def run_once(self):
-            return SimpleNamespace(failed=0, summary=lambda: "ok")
+            return SimpleNamespace(
+                failed=0, error="上传前接口检查失败：接口 400", summary=lambda: "failed"
+            )
 
     monkeypatch.setattr(cli, "_client", lambda config: Dummy())
     monkeypatch.setattr(cli, "_state", lambda config: Dummy())
     monkeypatch.setattr(cli, "Syncer", DummySyncer)
     monkeypatch.setattr(cli, "write_last_run", lambda *args: None)
 
-    args = argparse.Namespace(dry_run=False, force=False, limit=None)
-    assert cli.cmd_sync(args, config) == 0
-    assert captured["dry_run"] is True
+    args = argparse.Namespace(force=False, limit=None)
+    assert cli.cmd_sync(args, config) == 1
+    assert "dry_run" not in captured
 
     daemon_captured = {}
     monkeypatch.setattr(cli, "run_daemon", lambda *a, **kw: daemon_captured.update(kw))
-    daemon_args = argparse.Namespace(dry_run=False, force=False, no_run_now=True)
+    daemon_args = argparse.Namespace(force=False, no_run_now=True)
     assert cli.cmd_daemon(daemon_args, config) == 0
-    assert daemon_captured["dry_run"] is True
+    assert "dry_run" not in daemon_captured

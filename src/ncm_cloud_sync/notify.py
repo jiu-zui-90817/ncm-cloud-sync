@@ -363,6 +363,7 @@ def notify_run(channels: Any, notify_on: str, stats: Any, error: str | None = No
     paused = bool(_stat(stats, "paused", False))
     stopped = bool(_stat(stats, "stopped", False))
     failed = int(_stat(stats, "failed", 0) or 0)
+    error = error or str(_stat(stats, "error", "") or "") or None
     if stopped:
         event = "stopped"
     elif paused:

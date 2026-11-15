@@ -37,12 +37,10 @@ def test_env_overrides_yaml(tmp_path: Path) -> None:
         config,
         env={
             "NCM_CLOUD_SYNC_DIRS": str(other),
-            "NCM_CLOUD_SYNC_DRY_RUN": "true",
             "NCM_CLOUD_SYNC_INTERVAL": "5",
         },
     )
     assert loaded.music_dirs == [other]
-    assert loaded.dry_run is True
     assert loaded.interval == 5
 
 

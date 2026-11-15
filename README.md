@@ -25,7 +25,7 @@
 ## 特性
 
 - **原生飞牛应用**：`.fpk` 安装，带安装向导、启停、升级和卸载回调；**不需要 Docker**。
-- **内置 Web UI**：登录、状态、统计、手动同步、演练、设置、日志都在界面里完成；0.2.20 起分为概览 / 文件问题 / 设置 / 通知 / 日志与诊断；0.2.21 起增加「关于」页，可查看当前版本并检查 GitHub 更新。
+- **内置 Web UI**：登录、状态、统计、手动同步、设置、日志都在界面里完成；0.2.20 起分为概览 / 文件问题 / 设置 / 通知 / 日志与诊断；0.2.21 起增加「关于」页，可查看当前版本并检查 GitHub 更新。
 - **问题文件明细**：概览把失败和无权限合并为“问题文件”卡片，点开后在文件问题页可按全部 / 失败 / 无权限筛选，列表标注每条类型，支持复制路径、重置后重试。
 - **扫描差异可解释**：上次运行显示本地扫描候选数、实际处理数、云盘条目数和本地过滤明细（扩展名 / 排除 / 不可读 / 目录缺失），用来解释“云盘 563 首、任务只扫描 533 首”。
 - **运行历史详情**：概览「最近同步」每一行都可以点开，按类型查看本轮逐文件结果（上传 / 跳过 / 失败 / 无权限 / 忽略 / 缺失）；仅扫描记录还会列出待上传、已匹配、云端独有和本地重复。历史仍只保留最近 5 次，更早的记录连同明细一起清理。
@@ -38,7 +38,7 @@
   2. **云盘列表对账**：每轮开始读取云盘列表（`privateCloud.md5`），MD5 已在云盘的直接标记为 `skipped_remote`，不再申请上传 token；
   3. **云端字节去重**：真正上传前调用 eapi `/api/cloud/upload/check`，`needUpload=false` 说明文件字节已在对象存储，仍需 eapi info/v2 + pub/v2 补建云盘条目，单独记为 `linked`。
 - **增量同步**：SQLite 记录 `path + size + mtime_ns + md5 + status`，文件没变不重复计算、不重复上传。
-- **安全试跑**：界面里的“演练”只检查并显示计划，不分配 token、不上传、不写上传状态；「仅扫描」更轻量，只比较本地和云盘列表，适合先看差异。
+- **上传前接口预检**：每轮真正上传前先检查登录态、云盘列表和上传查重接口；任何一项不可用就中止本轮、不进入上传循环，并按失败结果推送通知，避免网易云接口变动时整轮空跑或重复上传。
 - **多目录 / 多格式**：可配置多个音乐目录；支持 mp3、flac、m4a、aac、ogg、opus、wav 等。
 - **元数据写入**：用 mutagen 读取标题 / 艺术家 / 专辑，上传时一并提交；没有标签时回退到文件名。
 - **失败隔离**：单个文件失败只标记该文件，下一轮继续；可重置失败状态重试。
@@ -64,6 +64,8 @@
 
 0.3.4 起，「仅扫描」复用同一套“本地候选 + 云盘 MD5 映射”逻辑，但完全不写 `files` 表、不上传、不触发同步通知；它把本轮结果作为 `mode=scan` 的执行记录保存。正常同步的每轮结果也会写入 `run_items`，因此「最近同步」可以点开查看逐文件明细；两类记录都只保留最近 5 次。
 
+0.3.5 起移除与「仅扫描」重叠的“演练”模式，同步前增加接口预检：先确认登录态、读取云盘列表、调用一次上传查重接口，全部通过才开始处理文件。预检失败会把本轮标记为失败、写入运行记录，并通过已配置的通知渠道推送“网易云云盘同步有失败”；不会申请上传 token，也不会修改文件状态。
+
 去重顺序是“先本地、再云盘列表、最后云端字节”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。0.2.20 起 Web UI 分为概览 / 文件问题 / 设置 / 通知 / 日志，失败与无权限可查看明细并重置重试；0.2.21 起增加「关于」页和检查更新，排除规则命中的旧记录自动隐藏为 ignored；后台自动同步可单独关闭；终止只结束当前一轮，自动同步仍按计划运行，只有暂停才会暂停自动同步直到点“继续”。0.3.1 起每轮同步前先读取云盘列表并按 MD5 对账，已在云盘的文件直接跳过；`needUpload=false` 的补建单独显示为“补建”，不再计入上传数和字节数；stdout/stderr 改写到 `app.out`，`app.log` 不再每条重复两次。0.3.2 起包用户改为 `ncm-cloud-sync`，概览新增最近 5 次执行记录（更早记录自动清理）；`app.log` 单文件 2 MB、保留 2 个备份，总上限 6 MB。
 
 ## 安装（飞牛 NAS，推荐）
@@ -78,7 +80,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.4.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.5.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -97,7 +99,7 @@ bash scripts/build-fnos.sh
 0.3.0 改了应用标识、包用户、数据目录和 Python 包名，应用中心不会把它当成 0.2.x 的升级。旧版本可以继续保留，确认新版本可用后再卸载。
 
 1. 停止旧应用，备份 `/var/apps/wy-music-cloud/var`；
-2. 安装 `ncm-cloud-sync-0.3.4.fpk`，启动一次让新数据目录生成，然后停止；
+2. 安装 `ncm-cloud-sync-0.3.5.fpk`，启动一次让新数据目录生成，然后停止；
 3. 把旧目录里的 `settings.json` 和 `data/` 复制到 `/var/apps/ncm-cloud-sync/var/`，确认属主是新的应用用户 `ncm-cloud-sync`；
 4. 启动新应用，检查账号、音乐目录、排除目录和通知配置；登录态失效时重新扫码；
 5. 确认同步正常后再卸载旧应用，卸载前不要删除旧数据目录。
@@ -112,7 +114,6 @@ bash scripts/build-fnos.sh
 | --- | --- | --- |
 | 音乐目录 | `/vol1/1000/Music` | NAS 上的绝对路径，必须已存在；应用只读扫描 |
 | 同步间隔 | `3600` | 秒，最小 60，最大 86400 |
-| 演练模式 | `false` | 第一次可先设为 `true`，只检查不上传 |
 | 日志级别 | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
 如果音乐目录的权限不允许应用包用户读取，应用中心会提示你授权目录；也可以在文件管理里给应用用户读权限。安装设置保存在应用数据目录的 `settings.json`，升级和修改配置会保留。
@@ -135,13 +136,13 @@ bash scripts/build-fnos.sh
 ### 5. 开始使用
 
 - **立即同步**：马上跑一轮真实上传；
-- **演练**：跑一轮只检查、不上传，适合首次确认；
+- **仅扫描**：只读扫描本地和云盘列表，查看差异，不写状态、不上传；
 - **暂停 / 终止 / 继续**：暂停在当前文件处理完后生效，并暂停后台自动同步，点“继续”恢复；终止会尽快结束当前一轮，但不会关闭自动同步，下一轮仍按计划运行；
 - **刷新**：更新状态统计；
-- **设置**：修改音乐目录、排除目录、同步间隔、请求间隔、自动同步开关、日志级别、演练模式；
+- **设置**：修改音乐目录、排除目录、同步间隔、请求间隔、自动同步开关、日志级别；
 - **日志**：查看最近运行日志和错误原因。
 
-后台会按 `同步间隔` 自动执行，前提是设置里的“自动同步”开关开启；应用停止后不会运行，重新启动后恢复。第一次建议先点「演练」，确认待上传数量符合预期。
+后台会按 `同步间隔` 自动执行，前提是设置里的“自动同步”开关开启；应用停止后不会运行，重新启动后恢复。第一次建议先点「仅扫描」，确认待上传数量符合预期，再点「立即同步」。
 
 ### 数据目录与备份
 
@@ -179,7 +180,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.4** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.5** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -201,6 +202,15 @@ var/
 
 0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.3.1，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
 
+**同步还没开始就提示“上传前接口检查失败”**
+
+0.3.5 起每轮上传前都会做一次预检：检查登录态（`/weapi/w/nuser/account/get`）、读取云盘列表（`/api/v1/cloud/get`）、调用一次上传查重接口（`/api/cloud/upload/check`）。任何一项失败都会中止本轮，不会申请上传 token，也不会修改已有文件状态；如果配置了通知渠道，会推送一条“网易云云盘同步有失败”。
+
+- 提示“未登录”或登录态失效：重新扫码或改用 Cookie 登录；
+- 读取云盘列表失败：检查 NAS 网络、网易云是否限流；稍后再试，或把“请求间隔”调大；
+- 查重接口不可用：通常是网易云接口变动或短时限流，日志里会带 `[code]` 和 `url`；保留“复制诊断”的内容反馈。
+
+「仅扫描」不调用查重接口，所以预检失败时仍可以用它查看本地和云盘的差异。
 **上传时提示 Connection refused / 无法获取上传节点**
 
 0.2.10 及更早版本只通过 HTTPS 访问 NOS 的 LBS 节点，并且按旧版 `data.upload[0].host` 解析。部分 NAS 网络到 `https://wanproxy.127.net` 会被拒绝，或网易云返回新的顶层 `upload` 字符串列表，导致每个文件都在“获取上传节点”处失败（`[Errno 111] Connection refused` 或 `NOS 上传节点获取失败`）。0.2.11 先试 HTTPS，失败自动改用 HTTP；同时兼容新旧两种响应，LBS 都不通时回退到 `nosup-jd1.127.net` / `nosup-hz1.127.net`。全部失败时会暂停本轮并把当前文件标记为待处理，不会刷屏。升级后停止再启动应用，确认 NAS 能解析并访问 `wanproxy.127.net`；如果仍失败，把“诊断信息”里的网络错误发出来。
@@ -215,7 +225,7 @@ var/
 
 **云盘数量没有增加 / 日志显示上传成功但云盘里没有**
 
-0.3.0 及更早版本把 `needUpload=false` 的“补建条目”也计入 uploaded，日志看起来一直在上传，实际没有新增字节，统计容易误导。0.3.1 起同步前先拉云盘列表，按 `privateCloud.md5` 对账，已有内容直接跳过；补建单独计入“补建 N”，不再算上传。升级后停止再启动，先跑一轮演练看“待上传 / 跳过 / 补建”，再跑真实同步。如果云盘数量仍不增加，复制诊断信息和日志里的“补建云盘条目成功 / 云盘已有相同内容”行反馈。
+0.3.0 及更早版本把 `needUpload=false` 的“补建条目”也计入 uploaded，日志看起来一直在上传，实际没有新增字节，统计容易误导。0.3.1 起同步前先拉云盘列表，按 `privateCloud.md5` 对账，已有内容直接跳过；补建单独计入“补建 N”，不再算上传。升级后停止再启动，先跑一轮「仅扫描」看“待上传 / 跳过 / 补建”，再跑真实同步。如果云盘数量仍不增加，复制诊断信息和日志里的“补建云盘条目成功 / 云盘已有相同内容”行反馈。
 
 **日志每条都重复两次**
 
@@ -256,7 +266,7 @@ cp config.example.yaml config.yaml
 # 编辑 config.yaml，至少设置 music_dirs
 docker compose build
 docker compose run --rm ncm-cloud-sync login --qr-png /data/qr.png
-docker compose run --rm ncm-cloud-sync sync --dry-run --limit 5
+docker compose run --rm ncm-cloud-sync sync --limit 5
 docker compose up -d
 ```
 
@@ -273,7 +283,7 @@ python -m venv .venv
 pip install -e .
 
 ncm-cloud-sync login
-ncm-cloud-sync --music-dir "D:\Music" sync --dry-run --limit 5
+ncm-cloud-sync --music-dir "D:\Music" sync --limit 5
 ncm-cloud-sync --music-dir "D:\Music" sync
 ```
 
@@ -302,12 +312,11 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 | `retries` | `3` | 网络 / 5xx 重试次数 |
 | `min_size` | `0` | 小于该字节数的文件跳过 |
 | `max_upload_size` | `0` | 大于该字节数的文件标记失败；0 表示不限制 |
-| `dry_run` | `false` | 全局试跑；命令行 `--dry-run` 也会打开 |
 | `log_level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
 环境变量优先级高于 YAML，低于命令行参数。支持：
 
-`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_DRY_RUN`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
+`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
 
 `NCM_CLOUD_SYNC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`NCM_CLOUD_SYNC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
 
@@ -349,8 +358,8 @@ ncm-cloud-sync [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 | `logout` | 删除本地会话文件 |
 | `check` | 检查登录状态，打印云盘歌曲数 |
 | `scan [--json]` | 只扫描本地文件，不上传 |
-| `sync [--dry-run] [--force] [--limit N]` | 执行一轮同步 |
-| `daemon [--dry-run] [--force] [--no-run-now]` | 常驻轮询（原生应用不需要） |
+| `sync [--force] [--limit N]` | 执行一轮同步（含上传前接口预检） |
+| `daemon [--force] [--no-run-now]` | 常驻轮询（原生应用不需要） |
 | `status [--json]` | 查看状态库统计、最近运行、最近文件 |
 | `config` | 打印生效配置（Cookie 已隐藏） |
 | `reset-failed` | 把 `failed` 重置为待处理，下一轮重试 |
@@ -380,7 +389,7 @@ ncm-cloud-sync [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 ## 风险与限制
 
 - 使用的是**非公开接口**，随时可能失效；协议集中在 [src/ncm_cloud_sync/client.py](src/ncm_cloud_sync/client.py)，细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
-- 不要用主账号做高频、大批量上传；建议先用演练 / `--limit` 小流量验证。
+- 不要用主账号做高频、大批量上传；建议先用「仅扫描」/ `--limit` 小流量验证。
 - 云盘容量、单文件大小、格式支持由网易云账号决定；本项目不做转码。
 - 云盘是扁平结构，本项目不创建文件夹层级。
 - 本项目不会修改你的本地音频标签，也不会下载歌曲。
@@ -395,7 +404,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、dry-run、缺失文件、QR 登录、Web API、通知、更新检查和 ignored 状态。
+测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、上传前接口预检、缺失文件、QR 登录、Web API、通知、更新检查和 ignored 状态。
 
 构建飞牛原生应用：
 

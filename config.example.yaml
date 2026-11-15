@@ -96,8 +96,5 @@ notify_channels: []
 #      secret: SEC...
 #      at_mobiles: "13800138000"
 
-# 全局试跑。命令行 --dry-run 也会打开。
-dry_run: false
-
 # DEBUG / INFO / WARNING / ERROR
 log_level: INFO

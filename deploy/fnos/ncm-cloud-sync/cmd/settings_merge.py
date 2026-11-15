@@ -12,8 +12,7 @@ def main() -> int:
     path = Path(sys.argv[1])
     music = sys.argv[2]
     interval = int(sys.argv[3])
-    dry_run = sys.argv[4].lower() == "true"
-    log_level = sys.argv[5]
+    log_level = sys.argv[4]
 
     data: dict[str, object] = {}
     if path.is_file():
@@ -27,7 +26,6 @@ def main() -> int:
     data["version"] = 1
     data["music_dirs"] = [music]
     data["interval"] = interval
-    data["dry_run"] = dry_run
     data["log_level"] = log_level
     # Newer settings survive an app-center config change; defaults only fill gaps.
     for key, default in (

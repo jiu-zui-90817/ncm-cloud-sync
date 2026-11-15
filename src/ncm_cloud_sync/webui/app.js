@@ -337,7 +337,6 @@
     el("excludeDirs").value = (settings.exclude_dirs || []).join("\n");
     el("interval").value = settings.interval || 3600;
     el("rateLimit").value = settings.rate_limit != null ? settings.rate_limit : 1;
-    el("dryRun").checked = Boolean(settings.dry_run);
     el("autoSync").checked = settings.auto_sync !== false;
     el("logLevel").value = settings.log_level || "INFO";
     el("notifyOn").value = settings.notify_on || "always";
@@ -418,7 +417,6 @@
     el("syncState").className = "tag" + (sync.running ? " active" : "");
     el("syncButton").disabled = Boolean(sync.running);
     el("scanOnlyButton").disabled = Boolean(sync.running);
-    el("dryRunButton").disabled = Boolean(sync.running);
     el("pauseButton").disabled = !sync.can_pause;
     el("stopButton").disabled = !sync.can_stop;
     el("resumeButton").disabled = !sync.can_resume;
@@ -982,16 +980,15 @@
     });
   }
 
-  function syncNow(scanOnly, dryRun) {
+  function syncNow(scanOnly) {
     api("/api/sync", {
       method: "POST",
       body: {
         scan_only: Boolean(scanOnly),
-        dry_run: Boolean(dryRun),
         force: el("forceRecheck").checked
       }
     }).then(function (data) {
-      var message = scanOnly ? "仅扫描任务已启动" : (dryRun ? "演练任务已启动" : "同步任务已启动");
+      var message = scanOnly ? "仅扫描任务已启动" : "同步任务已启动";
       showToast(data.started ? message : "已有同步任务在运行");
       loadStatus(false);
     }).catch(function (error) {
@@ -1221,7 +1218,6 @@
       exclude_dirs: excludes,
       interval: Number(el("interval").value),
       rate_limit: Number(el("rateLimit").value),
-      dry_run: el("dryRun").checked,
       auto_sync: el("autoSync").checked,
       log_level: el("logLevel").value,
       notify_on: el("notifyOn").value,
@@ -1293,9 +1289,8 @@
         loadDiagnostics("loginDiagnosticsView");
       }
     });
-    el("syncButton").addEventListener("click", function () { syncNow(false, false); });
-    el("scanOnlyButton").addEventListener("click", function () { syncNow(true, false); });
-    el("dryRunButton").addEventListener("click", function () { syncNow(false, true); });
+    el("syncButton").addEventListener("click", function () { syncNow(false); });
+    el("scanOnlyButton").addEventListener("click", function () { syncNow(true); });
     el("runDetailClose").addEventListener("click", closeRunDetail);
     el("runDetailMore").addEventListener("click", function () { loadRunDetail(false); });
     el("runDetailModal").addEventListener("click", function (event) {

@@ -264,7 +264,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - token 分配和 NOS 上传之间不要长时间停顿；
 - 上传前先 `check`，这是最便宜、最有效的去重；
 - 把协议封装在一个 client 模块里，接口变化时只改一处；
-- 保留 `--dry-run`，先用小流量验证；
+- 正式上传前先做一次完整预检（登录态、云盘列表、上传查重），接口不可用就中止本轮，不要带着失效接口逐文件重试；
 - 不要并发上传大量文件，适当 `rate_limit`；遇到 405/429 暂停整轮，等冷却后再继续。
 - 0.2.19 起支持在 Web UI 暂停、终止、继续；暂停在当前文件处理完后生效，终止会尽快结束本轮。
 - 0.2.20 起终止只结束当前一轮，自动同步仍按计划运行；暂停才会暂停自动同步直到点“继续”；自动同步可在设置里单独关闭。通知只观察同步结果，发送失败不会影响同步流程。
@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.5 起移除 `dry_run` / 演练（与仅扫描重叠），同步模式只剩 `sync` 和 `scan`；每轮上传前调用新增的 `CloudClient.preflight()`：检查 `login_status()`、读取云盘列表并调用一次 `/api/cloud/upload/check`（不申请 whale token）。预检失败时本轮直接中止、`stats.error` 记录“上传前接口检查失败：…”，运行记录写入错误，`notify_run` 会把 `stats.error` 视为失败事件推送；云盘列表读取失败也不再用空映射继续，避免重复上传。旧历史里的 `mode=dry_run` 和 item kind `planned` 仅保留只读展示兼容。
 - 0.3.4 起 `runs` 新增 `mode`（sync/scan）和 `stats_json`，新增 `run_items` 表保存逐文件结果（kind/path/name/detail/size，按 run 索引）；`POST /api/sync` 支持 `{"scan_only": true}`，只读扫描、不写 `files`、不上传、不发通知；`GET /api/runs/<id>?kind=&limit=&offset=` 返回 `{run,counts,items,total,limit,offset,kind}`，`limit` 1–500，记录不存在返回 404；`/api/status` 的 `runs[].mode`/`runs[].stats` 可直接读取；`finish_run` 清理旧记录时先删对应 `run_items`，历史仍只保留 5 次。
 - 0.3.3 起 `/api/status.stats` 新增 `problems_total`（失败 + 无权限）；`GET /api/problems` 默认 `kind=all`，每行新增 `kind`（failed/permission）。最近一次运行统计新增 `processed`、`cloud_songs`、`scan_unsupported`、`scan_excluded`、`scan_unreadable`、`scan_missing_roots`、`unsupported_extensions` 和 `filtered`；`scanned` 改为本地候选数，实际处理数看 `processed`。
 - 0.3.2 起 `runs` 表只保留最近 5 次执行记录，`finish_run` 写入后自动删除更早行；`GET /api/runs?limit=` 返回记录（limit 上限 5），`/api/status` 也带 `runs`。`app.log` 单文件 2 MB、保留 2 个备份，`/api/logs` 返回 `log_files`（path/exists/size）和 `log_limit_bytes`。

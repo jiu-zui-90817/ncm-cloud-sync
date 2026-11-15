@@ -703,6 +703,31 @@ class CloudClient:
             "raw": body,
         }
 
+    def preflight(self, index: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+        """上传前检查登录态与上传查重接口，失败时抛异常。
+
+        只调用只读接口：login_status / check_upload。不能调用 whale_alloc，
+        否则会在真正上传前分配 token，甚至触发限流。
+        """
+        profile = self.login_status()
+        probe_md5 = "0" * 32
+        probe_size = 1024
+        for md5, info in (index or {}).items():
+            if md5:
+                probe_md5 = str(md5)
+                try:
+                    probe_size = int(info.get("size") or probe_size)
+                except (TypeError, ValueError):
+                    probe_size = 1024
+                break
+        check = self.check_upload(probe_md5, probe_size, "mp3")
+        return {
+            "user_id": profile.get("userId") or profile.get("id"),
+            "cloud_songs": int(getattr(self, "last_cloud_song_count", 0) or 0),
+            "probe_md5": probe_md5,
+            "need_upload": bool(check.get("need_upload")),
+        }
+
     def whale_alloc(self, md5: str, filename: str) -> dict[str, Any]:
         """申请新版鲸鱼上传 token（HyPlayer 的 musicupload 流程）。
 
@@ -916,7 +941,6 @@ class CloudClient:
         path: str | Path,
         *,
         md5: str | None = None,
-        dry_run: bool = False,
     ) -> UploadResult:
         """完整上传一首歌；调用方负责本地状态与并发控制。"""
         path = Path(path)
@@ -933,8 +957,6 @@ class CloudClient:
             check["song_id"],
         )
         logger.debug("云盘查重响应: %s", check.get("raw"))
-        if dry_run:
-            return UploadResult(False, reason="dry_run")
 
         tags = read_tags(path)
         name = sanitize_filename(tags.get("title") or path.stem)

@@ -140,7 +140,6 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
             "exclude_dirs": [str(excluded)],
             "interval": 300,
             "rate_limit": 2.5,
-            "dry_run": True,
             "log_level": "DEBUG",
         },
     )
@@ -149,7 +148,6 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert app.config.music_dirs == [music]
     assert app.config.interval == 300
     assert app.config.rate_limit == 2.5
-    assert app.config.dry_run is True
     assert app.config.exclude_dirs == (excluded.resolve(),)
     saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert saved["music_dirs"] == [str(music)]
@@ -217,7 +215,6 @@ def test_settings_save_notifications_and_auto_sync(tmp_path: Path) -> None:
             "exclude_dirs": [],
             "interval": 1800,
             "rate_limit": 1.0,
-            "dry_run": False,
             "log_level": "INFO",
             "auto_sync": False,
             "notify_on": "failure",

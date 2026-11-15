@@ -15,22 +15,31 @@ from ncm_cloud_sync.syncer import Syncer
 
 
 class FakeClient:
-    def __init__(self, outcomes=None, cloud=None, cloud_index=None) -> None:
+    def __init__(
+        self, outcomes=None, cloud=None, cloud_index=None, preflight_error=None, cloud_error=None
+    ) -> None:
         self.outcomes = outcomes or {}
         self.cloud = cloud or {}
         self.cloud_index = cloud_index or {}
-        self.calls: list[tuple[str, bool]] = []
+        self.preflight_error = preflight_error
+        self.cloud_error = cloud_error
+        self.calls: list[str] = []
+
+    def preflight(self, index):
+        if self.preflight_error is not None:
+            raise self.preflight_error
+        return {"user_id": 1, "cloud_songs": len(self.cloud), "need_upload": True}
 
     def cloud_song_md5_map(self) -> dict[str, int]:
+        if self.cloud_error is not None:
+            raise self.cloud_error
         return dict(self.cloud)
 
     def cloud_song_index(self) -> dict[str, dict]:
         return dict(self.cloud_index)
 
-    def upload(self, path, *, md5=None, dry_run=False):
-        self.calls.append((Path(path).name, dry_run))
-        if dry_run:
-            return UploadResult(False, reason="dry_run")
+    def upload(self, path, *, md5=None):
+        self.calls.append(Path(path).name)
         outcome = self.outcomes.get(Path(path).name)
         if outcome is None:
             return UploadResult(True, song_id=len(self.calls))
@@ -158,17 +167,43 @@ def test_failure_is_isolated(tmp_path: Path) -> None:
         assert state.get(music / "b.mp3").status == "uploaded"
 
 
-def test_dry_run_does_not_persist_uploaded(tmp_path: Path) -> None:
+def test_preflight_failure_aborts_before_upload(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()
     (music / "a.mp3").write_bytes(b"a")
     config = make_config(tmp_path, music)
-    client = FakeClient()
+    client = FakeClient(preflight_error=UploadError("上传查重接口 400"))
     with StateStore(config.db_path) as state:
-        stats = Syncer(config, client, state, dry_run=True).run_once()
-        assert stats.planned == 1
+        stats = Syncer(config, client, state).run_once()
+        assert stats.aborted is True
+        assert stats.preflight_ok is False
+        assert "上传前接口检查失败" in stats.error
+        assert "上传查重接口 400" in stats.error
         assert stats.uploaded == 0
+        assert client.calls == []
         assert state.get(music / "a.mp3") is None
+        run = state.recent_runs(1)[0]
+        assert run["error"] and "上传前接口检查失败" in run["error"]
+
+
+def test_cloud_list_failure_aborts_before_upload(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    client = FakeClient(cloud_error=UploadError("cloud/get 500"))
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.aborted is True
+        assert stats.preflight_ok is False
+        assert "上传前接口检查失败" in stats.error
+        assert "读取云盘列表失败" in stats.error
+        assert "cloud/get 500" in stats.error
+        assert stats.uploaded == 0
+        assert client.calls == []
+        assert state.get(music / "a.mp3") is None
+        run = state.recent_runs(1)[0]
+        assert run["error"] and "读取云盘列表失败" in run["error"]
 
 
 def test_missing_file_marked(tmp_path: Path) -> None:

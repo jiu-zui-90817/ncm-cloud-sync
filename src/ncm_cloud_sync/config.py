@@ -91,7 +91,6 @@ class Config:
     auto_sync: bool = True
     notify_on: str = "always"
     notify_channels: tuple[dict[str, Any], ...] = ()
-    dry_run: bool = False
     log_level: str = "INFO"
     config_path: Path | None = None
 
@@ -137,7 +136,6 @@ class Config:
             "auto_sync": self.auto_sync,
             "notify_on": self.notify_on,
             "notify_channels": mask_channels(self.notify_channels),
-            "dry_run": self.dry_run,
             "log_level": self.log_level,
         }
 
@@ -194,8 +192,6 @@ class Config:
             values["notify_on"] = str(raw["notify_on"]).strip().lower()
         if "notify_channels" in raw:
             values["notify_channels"] = tuple(normalize_channels(raw["notify_channels"]))
-        if "dry_run" in raw:
-            values["dry_run"] = parse_bool(raw["dry_run"])
         if "log_level" in raw:
             values["log_level"] = str(raw["log_level"]).upper()
 
@@ -306,9 +302,6 @@ class Config:
                 values["notify_channels"] = tuple(normalize_channels(json.loads(notify_channels)))
             except (ValueError, json.JSONDecodeError) as exc:
                 raise ConfigError(f"NCM_CLOUD_SYNC_NOTIFY_CHANNELS 不是合法 JSON: {exc}") from exc
-        dry_run = text("NCM_CLOUD_SYNC_DRY_RUN")
-        if dry_run is not None:
-            values["dry_run"] = parse_bool(dry_run)
         log_level = text("NCM_CLOUD_SYNC_LOG_LEVEL")
         if log_level:
             values["log_level"] = log_level.upper()

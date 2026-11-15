@@ -48,7 +48,6 @@ def run_daemon(
     state: StateStore,
     stop_event: threading.Event,
     *,
-    dry_run: bool = False,
     force: bool = False,
     run_immediately: bool = True,
 ) -> None:
@@ -61,7 +60,6 @@ def run_daemon(
                 config,
                 client,
                 state,
-                dry_run=dry_run,
                 force=force,
                 stop_event=stop_event,
             )

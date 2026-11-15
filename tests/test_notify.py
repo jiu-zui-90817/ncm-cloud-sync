@@ -70,6 +70,18 @@ def test_notify_run_filters_by_result(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(notify.notify_run(channels, "always", stopped)) == 1
     assert "已终止" in sent[-1][1]
 
+    preflight_failed = SimpleNamespace(
+        failed=0,
+        paused=False,
+        stopped=False,
+        scanned=3,
+        uploaded=0,
+        permission_denied=0,
+        error="上传前接口检查失败：接口 400",
+    )
+    assert len(notify.notify_run(channels, "failure", preflight_failed)) == 1
+    assert "有失败" in sent[-1][1]
+
 
 def test_webhook_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}

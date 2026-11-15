@@ -55,7 +55,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "music_dirs": [],
     "interval": 3600,
     "rate_limit": 1.0,
-    "dry_run": False,
     "log_level": "INFO",
     "exclude_dirs": [],
     "auto_sync": True,
@@ -260,7 +259,6 @@ class SettingsStore:
                 for item in stored_excludes
                 if str(item).strip() and Path(str(item)).expanduser().is_absolute()
             ]
-        data["dry_run"] = _as_bool(raw.get("dry_run"), False)
         data["auto_sync"] = _as_bool(raw.get("auto_sync"), True)
         notify_on = str(raw.get("notify_on") or "always").lower()
         data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
@@ -281,7 +279,6 @@ class SettingsStore:
         data["exclude_dirs"] = normalize_exclude_dirs(
             payload.get("exclude_dirs") or [], data["music_dirs"]
         )
-        data["dry_run"] = _as_bool(payload.get("dry_run"), False)
         data["auto_sync"] = _as_bool(payload.get("auto_sync"), True)
         notify_on = str(payload.get("notify_on") or "always").lower()
         if notify_on not in {"always", "failure", "success", "never"}:
@@ -319,7 +316,6 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
     if notify_on in {"always", "failure", "success", "never"}:
         config.notify_on = notify_on
     config.notify_channels = tuple(settings.get("notifications") or [])
-    config.dry_run = bool(settings.get("dry_run", config.dry_run))
     level = str(settings.get("log_level") or config.log_level).upper()
     if level in ALLOWED_LOG_LEVELS:
         config.log_level = level
@@ -341,7 +337,6 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["auto_sync"] = config.auto_sync
     settings["notify_on"] = config.notify_on
     settings["notifications"] = list(config.notify_channels)
-    settings["dry_run"] = config.dry_run
     settings["log_level"] = config.log_level
     return settings
 
@@ -537,17 +532,15 @@ class SyncManager:
             apply_settings(self.config, settings)
         self._wake.set()
         logger.info(
-            "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，排除目录 %s 个，dry_run=%s",
+            "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，排除目录 %s 个",
             self.config.interval,
             self.config.rate_limit,
             len(self.config.exclude_dirs),
-            self.config.dry_run,
         )
 
     def trigger(
         self,
         *,
-        dry_run: bool = False,
         force: bool = False,
         source: str = "manual",
         scan_only: bool = False,
@@ -567,11 +560,9 @@ class SyncManager:
             self._started_at = utc_now()
             self._error = None
             self._progress = []
-            effective_dry_run = bool(dry_run or self.config.dry_run)
             self._thread = threading.Thread(
                 target=self._run,
                 kwargs={
-                    "dry_run": effective_dry_run,
                     "force": force,
                     "scan_only": bool(scan_only),
                 },
@@ -631,7 +622,7 @@ class SyncManager:
             "next_run_at": self._next_run_at,
         }
 
-    def _run(self, *, dry_run: bool, force: bool, scan_only: bool = False) -> None:
+    def _run(self, *, force: bool, scan_only: bool = False) -> None:
         started = time.monotonic()
         stats: SyncStats | None = None
         try:
@@ -648,7 +639,6 @@ class SyncManager:
                         self.config,
                         client,
                         state,
-                        dry_run=dry_run,
                         force=force,
                         progress=self._on_progress,
                         stop_event=self._stop_run,
@@ -659,6 +649,8 @@ class SyncManager:
                 from .daemon import write_last_run
 
                 write_last_run(self.config.last_run_path, stats)
+                if stats.error:
+                    self._error = stats.error
                 logger.info("Web 触发的同步完成: %s", stats.summary())
             finally:
                 client.close()
@@ -848,7 +840,6 @@ class WebApp:
                 body = self._body(environ)
                 scan_only = _as_bool(body.get("scan_only"), False)
                 started = self.sync.trigger(
-                    dry_run=False if scan_only else _as_bool(body.get("dry_run"), False),
                     force=_as_bool(body.get("force"), False),
                     source="manual",
                     scan_only=scan_only,
@@ -1083,7 +1074,6 @@ class WebApp:
             "auto_sync": self.config.auto_sync,
             "notify_on": self.config.notify_on,
             "notifications": list(self.config.notify_channels),
-            "dry_run": self.config.dry_run,
             "log_level": self.config.log_level,
             "settings_path": str(self.settings.path),
         }

@@ -34,23 +34,6 @@
       },
       {
         "type": "select",
-        "field": "wizard_dry_run",
-        "label": "演练模式",
-        "initValue": "false",
-        "helpText": "开启后只检查、不上传，适合首次确认。",
-        "options": [
-          {
-            "label": "关闭（正常上传）",
-            "value": "false"
-          },
-          {
-            "label": "开启（只检查）",
-            "value": "true"
-          }
-        ]
-      },
-      {
-        "type": "select",
         "field": "wizard_log_level",
         "label": "日志级别",
         "initValue": "INFO",
