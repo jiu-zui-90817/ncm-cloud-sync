@@ -481,9 +481,12 @@ class CloudClient:
                 exc,
             )
             raise
+        raw_song_id = body.get("songId")
         return {
             "need_upload": bool(body.get("needUpload")),
-            "song_id": _as_int(body.get("songId"), 0) or None,
+            # 保留 0：新文件查重会返回 songId=0，官方客户端仍会把它作为
+            # songid="0" 提交；只有响应里完全没有 songId 时才省略。
+            "song_id": _as_int(raw_song_id, 0) if raw_song_id is not None else None,
             "raw": body,
         }
 
@@ -614,9 +617,11 @@ class CloudClient:
             # 官方客户端把 resourceId 作为整数提交；传字符串会得到 400 接口调用失败。
             "resourceId": _as_int(resource_id, 0),
         }
-        # songid 是查重接口返回的字符串；没有匹配歌曲时必须省略，不能传 0。
-        if song_id:
+        # songid 是查重接口返回的字符串；查重返回 0 时也要提交 "0"，
+        # 只有响应里完全没有 songId 时才省略。
+        if song_id is not None:
             payload["songid"] = str(song_id)
+        logger.debug("提交云盘信息: %s", payload)
         try:
             body = self._weapi("/api/upload/cloud/info/v2", payload)
         except ApiError as exc:
@@ -666,13 +671,16 @@ class CloudClient:
 
         tags = read_tags(path)
         name = sanitize_filename(tags.get("title") or path.stem)
-        resource = self.alloc_token(md5, name, ext, bucket="")
+        # 云盘上传只申请一个 NOS 桶 token：resourceId 必须来自这个实际上传的
+        # token。另申请空桶 token 再用它的 resourceId 提交 info/v2 会得到
+        # [400] 接口调用失败（0.2.12 及更早版本的错误）。
+        token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
         if check["need_upload"]:
-            nos_token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
-            self.upload_to_nos(nos_token, path, md5, ext)
+            self.upload_to_nos(token, path, md5, ext)
         else:
             # needUpload=false 只说明文件字节已在网易云对象存储，
-            # 云盘条目仍需 info/v2 + pub/v2 才会出现在云盘列表。
+            # 云盘条目仍需 info/v2 + pub/v2 才会出现在云盘列表；
+            # 这里复用同一个 token 的 resourceId 补建条目。
             logger.info("文件内容已在网易云对象存储，补建云盘条目: %s", path)
         song_id = self.finish_upload(
             md5=md5,
@@ -681,7 +689,7 @@ class CloudClient:
             song=name,
             album=display_album(tags),
             artist=display_artist(tags),
-            resource_id=resource.get("resourceId", 0),
+            resource_id=token.get("resourceId", 0),
         )
         self.publish(song_id)
         return UploadResult(True, song_id=song_id, reason="uploaded", cloud_name=name)

@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.12.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.13.fpk`）。
 
 自行构建：
 
@@ -172,7 +172,7 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.12**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.13**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 
@@ -180,11 +180,11 @@ sudo rm -rf /var/apps/wy-music-cloud/var
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-日志会记录具体文件与错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.12，停止再启动应用后重试。页面底部日志卡片点“诊断信息”，会显示真实的 `app.log` 路径、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使日志文件因权限没写成，内置日志缓冲仍可查看。其他常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
+日志会记录具体文件与错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.13，停止再启动应用后重试。页面底部日志卡片点“诊断信息”，会显示真实的 `app.log` 路径、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使日志文件因权限没写成，内置日志缓冲仍可查看。其他常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.11 及更早版本提交云盘信息时把 `resourceId` 作为字符串、把空 `songid` 传成 0，并用不带扩展名的标题作为 `filename`，网易云会返回 [400] 接口调用失败（`/weapi/upload/cloud/info/v2`）。0.2.12 改为整数 `resourceId`，空 `songid` 直接省略，`filename` 使用真实文件名（含扩展名），`song` 仍用标题，并且不发送 `objectKey`。升级到 0.2.12，停止再启动应用后重试；若仍失败，复制诊断信息，日志里的“提交云盘信息失败”会带上 filename、songid 和 resourceId。
+0.2.11 及更早版本提交云盘信息时把 `resourceId` 作为字符串、把空 `songid` 传成 0，并用不带扩展名的标题作为 `filename`，网易云会返回 [400] 接口调用失败（`/weapi/upload/cloud/info/v2`）。0.2.12 改为整数 `resourceId`，空 `songid` 直接省略，`filename` 使用真实文件名（含扩展名），`song` 仍用标题，并且不发送 `objectKey`。0.2.12 仍可能返回同样的 400：它用空桶 token 的 `resourceId` 提交，却用另一个 NOS 桶 token 上传文件。0.2.13 只申请一个 NOS 桶 token，上传和 `resourceId` 提交都用它，不再申请空桶 token；查重返回 `songId=0` 时提交字符串 `"0"`，只有响应完全没有 `songId` 时才省略。升级到 0.2.13，停止再启动应用后重试；若仍失败，复制诊断信息，日志里的“提交云盘信息失败”会带上 filename、songid 和 resourceId。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 

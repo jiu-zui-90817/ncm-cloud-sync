@@ -40,6 +40,13 @@ def test_check_upload_payload() -> None:
     assert payload["md5"] == "abc"
 
 
+def test_check_upload_keeps_zero_song_id() -> None:
+    client = make_client()
+    client._weapi = lambda *a, **k: {"needUpload": True, "songId": 0}  # type: ignore[method-assign]
+    result = client.check_upload("abc", 123, "mp3")
+    assert result["song_id"] == 0
+
+
 def test_alloc_token_sanitizes_name() -> None:
     client = make_client()
     captured = {}
@@ -126,6 +133,28 @@ def test_finish_upload_string_song_id_and_resource_id() -> None:
     assert captured["resourceId"] == 42
 
 
+def test_finish_upload_submits_zero_song_id() -> None:
+    client = make_client()
+    captured: dict = {}
+
+    def fake_weapi(path, payload=None, **kwargs):
+        captured.update(payload or {})
+        return {"code": 200, "songId": "5"}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    new_id = client.finish_upload(
+        md5="abc",
+        song_id=0,
+        filename="a.mp3",
+        song="a",
+        album="未知专辑",
+        artist="未知艺术家",
+        resource_id=1,
+    )
+    assert new_id == 5
+    assert captured["songid"] == "0"
+
+
 def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "whatever.mp3"
     path.write_bytes(b"x")
@@ -135,9 +164,9 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     captured: dict = {}
 
     def alloc(md5, name, ext, *, bucket=""):
-        assert bucket == "", "needUpload=false 时不应再分配 NOS 对象"
+        assert bucket == NOS_BUCKET
         events.append("alloc")
-        return {"resourceId": 36656729598}
+        return {"resourceId": 36656729598, "objectKey": "obj/key", "token": "nos-token"}
 
     client.alloc_token = alloc  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not upload bytes"))  # type: ignore[method-assign]
@@ -164,14 +193,14 @@ def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     client.check_upload = lambda *a, **k: (events.append("check"), {"need_upload": True, "song_id": 0})[1]  # type: ignore[method-assign]
 
     def alloc(md5, name, ext, *, bucket=""):
-        events.append("alloc:" + (bucket or "resource"))
-        if bucket:
-            return {"objectKey": "obj/key", "token": "nos-token"}
-        return {"resourceId": "resource-id"}
+        assert bucket == NOS_BUCKET
+        events.append("alloc:" + bucket)
+        return {"objectKey": "obj/key", "token": "nos-token", "resourceId": 36656729598}
 
     client.alloc_token = alloc  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: events.append("nos")  # type: ignore[method-assign]
-    client.finish_upload = lambda **k: (events.append("info"), 99)[1]  # type: ignore[method-assign]
+    captured: dict = {}
+    client.finish_upload = lambda **k: (events.append("info"), captured.update(k), 99)[2]  # type: ignore[method-assign]
     client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
     monkeypatch.setattr(client_module, "read_tags", lambda p: {"title": "晴天"})
 
@@ -179,7 +208,8 @@ def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     assert result.uploaded is True
     assert result.song_id == 99
     assert result.cloud_name == "晴天"
-    assert events == ["check", "alloc:resource", "alloc:" + NOS_BUCKET, "nos", "info", "pub:99"]
+    assert events == ["check", "alloc:" + NOS_BUCKET, "nos", "info", "pub:99"]
+    assert captured["resource_id"] == 36656729598
 
 
 def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:

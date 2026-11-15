@@ -96,11 +96,11 @@ weapi 明文：
 
 返回重点：
 
-- `body.needUpload == false`：云端已有，直接跳过；
+- `body.needUpload == false`：文件字节已在网易云对象存储，但仍需申请 token 并用 info/v2 + pub/v2 补建云盘条目；
 - `body.songId`：云端已有歌曲 ID，后续 finalize 会用到；
-- `body.needUpload == true`：继续分配上传 token。
+- `body.needUpload == true`：申请上传 token 并上传文件字节。
 
-## 6. 分配 resourceId（token A）
+## 6. 申请上传 token（单个 NOS 桶 token）
 
 ```http
 POST https://music.163.com/weapi/nos/token/alloc
@@ -109,24 +109,14 @@ POST https://music.163.com/weapi/nos/token/alloc
 weapi 明文：
 
 ```json
-{"bucket":"","ext":"mp3","filename":"<不含扩展名的文件名>","local":false,"nos_product":3,"type":"audio","md5":"<md5>"}
-```
-
-返回 `result.resourceId`。
-
-## 7. 分配 NOS 对象（token B）
-
-同样接口，但参数不同：
-
-```json
 {"bucket":"jd-musicrep-privatecloud-audio-public","ext":"<实际扩展名>","filename":"<清洗后的文件名>","local":false,"nos_product":3,"type":"audio","md5":"<md5>"}
 ```
 
 文件名清洗：去掉扩展名、去掉空白、把 `.` 换成 `_`。
 
-返回 `result.objectKey` 和 `result.token`。
+返回 `result.resourceId`、`result.objectKey` 和 `result.token`。三者必须来自同一个 token：上传字节用 `objectKey`/`token`，写入云盘信息用同一个 `result.resourceId`。不要先申请空桶 token 再用它的 `resourceId`，否则 info/v2 会返回 [400] 接口调用失败。
 
-## 8. 获取 NOS 上传节点
+## 7. 获取 NOS 上传节点
 
 ```http
 GET https://wanproxy.127.net/lbs?version=1.0&bucketname=jd-musicrep-privatecloud-audio-public
@@ -142,7 +132,7 @@ GET https://wanproxy.127.net/lbs?version=1.0&bucketname=jd-musicrep-privatecloud
 
 > 旧代码里硬编码的 `http://45.127.129.8` 已过时；现在用 LBS 返回的节点。参考 [NeteaseCloudMusicApi#1851](https://github.com/Binaryify/NeteaseCloudMusicApi/pull/1851)。
 
-## 9. 上传文件到 NOS
+## 8. 上传文件到 NOS
 
 ```http
 POST http://<host>/<bucket>/<objectKey>
@@ -155,7 +145,7 @@ POST http://<host>/<bucket>/<objectKey>
 - Header `Content-Type: audio/mpeg`（按实际格式可调整）；
 - Body 是文件原始字节，`Content-Length` 必须准确。
 
-## 10. 写入云盘信息
+## 9. 写入云盘信息
 
 ```http
 POST https://music.163.com/weapi/upload/cloud/info/v2
@@ -164,16 +154,16 @@ POST https://music.163.com/weapi/upload/cloud/info/v2
 weapi 明文：
 
 ```json
-{"md5":"<md5>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<token A 的 resourceId 整数>}
+{"md5":"<md5>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<同一个 NOS token 的 resourceId 整数>}
 ```
 
-字段要求：`songid` 仅在 check 返回非空 `songId` 时带上（字符串），没有匹配歌曲时必须省略，不要传 0；`resourceId` 必须是整数，传字符串会被判为参数错误并返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
+字段要求：`songid` 用 check 返回的 `songId` 转成字符串提交，返回 0 时提交 `"0"`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是整数且来自第 6 步实际用于上传的那个 NOS token，传字符串或空桶 token 的 resourceId 都会返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
 
 标签缺失时回退：`song` 用文件名，`album` 用“未知专辑”，`artist` 用“未知艺术家”。
 
 返回新的 `songId`。
 
-## 11. 发布到云盘
+## 10. 发布到云盘
 
 ```http
 POST https://music.163.com/weapi/cloud/pub/v2
@@ -187,21 +177,19 @@ weapi 明文：
 
 成功后可被云盘列表看到。
 
-## 12. 完整顺序
+## 11. 完整顺序
 
 ```text
 check(md5,size)
-  ├─ needUpload=false ──► 结束（skipped_remote）
-  └─ needUpload=true
-       ├─ token/alloc bucket=""                -> resourceId
-       ├─ token/alloc bucket=jd-musicrep-...   -> objectKey, token
+  ├─ needUpload=false：跳过字节上传，但仍要走完下面的补建流程
+  └─ token/alloc bucket=jd-musicrep-...   -> resourceId, objectKey, token
        ├─ GET lbs                              -> host
-       ├─ POST NOS (文件字节)                   -> 上传完成
+       ├─ needUpload=true: POST NOS (文件字节) -> 上传完成
        ├─ info/v2 (md5,songid,resourceId,...)  -> songId
        └─ pub/v2 (songid)                      -> 发布
 ```
 
-## 13. 常见错误
+## 12. 常见错误
 
 | 现象 | 可能原因 |
 | --- | --- |
@@ -213,7 +201,7 @@ check(md5,size)
 | `needUpload=false` 但列表看不到 | 已上传未发布，或客户端缓存；检查 pub/v2 是否成功 |
 | 上传成功但云盘不显示 | 发布失败、审核/格式限制、客户端刷新延迟 |
 
-## 14. 稳定性建议
+## 13. 稳定性建议
 
 - 所有请求设置超时；网络错误和 5xx 才重试，4xx 不盲目重试；
 - token 分配和 NOS 上传之间不要长时间停顿；
@@ -222,7 +210,7 @@ check(md5,size)
 - 保留 `--dry-run`，先用小流量验证；
 - 不要并发上传大量文件，适当 `rate_limit`。
 
-## 15. 参考
+## 14. 参考
 
 - [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)
 - [lulu-ls/cloud-uploader](https://github.com/lulu-ls/cloud-uploader)
