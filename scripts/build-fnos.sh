@@ -8,8 +8,13 @@ if [ -z "$VERSION" ]; then
   echo "无法从 manifest 读取版本号。" >&2
   exit 1
 fi
+if [ ! -f "$PRIVILEGE" ] || ! grep -q '"username": "ncm-cloud-sync"' "$PRIVILEGE"; then
+  echo "config/privilege 缺失或包用户不是 ncm-cloud-sync。" >&2
+  exit 1
+fi
 SERVER="$APP/app/server"
 DIST="$ROOT/dist"
+PRIVILEGE="$APP/config/privilege"
 WHEEL_ROOT="$ROOT/.wheels/native"
 TMP_ROOT="$ROOT/.tmp/fnpack-native"
 

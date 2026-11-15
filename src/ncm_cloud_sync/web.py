@@ -63,6 +63,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notifications": [],
 }
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 2
+RUN_HISTORY_LIMIT = 5
 STATIC_FILES = {
     "": ("index.html", "text/html; charset=utf-8"),
     "index.html": ("index.html", "text/html; charset=utf-8"),
@@ -519,7 +522,7 @@ class SyncManager:
         if self._scheduler and self._scheduler.is_alive():
             return
         self._stop.clear()
-        self._scheduler = threading.Thread(target=self._scheduler_loop, name="wy-scheduler", daemon=True)
+        self._scheduler = threading.Thread(target=self._scheduler_loop, name="ncm-scheduler", daemon=True)
         self._scheduler.start()
 
     def stop(self) -> None:
@@ -559,7 +562,7 @@ class SyncManager:
             self._thread = threading.Thread(
                 target=self._run,
                 kwargs={"dry_run": effective_dry_run, "force": force},
-                name="wy-sync",
+                name="ncm-sync",
                 daemon=True,
             )
             self._thread.start()
@@ -892,16 +895,36 @@ class WebApp:
                 self.sync.apply_settings(settings)
                 self._apply_log_level(settings.get("log_level", "INFO"))
                 return self._json(start_response, "200 OK", {"ok": True, "settings": settings})
+            if path == "/api/runs" and method == "GET":
+                query = parse_qs(str(environ.get("QUERY_STRING") or ""))
+                limit = min(
+                    RUN_HISTORY_LIMIT,
+                    _as_int((query.get("limit") or ["5"])[0], 5, 1, 1000),
+                )
+                with StateStore(self.config.db_path) as state:
+                    runs = state.recent_runs(limit)
+                return self._json(start_response, "200 OK", {"runs": runs})
             if path == "/api/logs" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 lines = _as_int((query.get("lines") or ["200"])[0], 200, 10, 1000)
+                log_files = []
+                for item in self.log_paths:
+                    info = {"path": str(item), "exists": item.is_file(), "size": None}
+                    if info["exists"]:
+                        try:
+                            info["size"] = item.stat().st_size
+                        except OSError:
+                            pass
+                    log_files.append(info)
                 return self._json(
                     start_response,
                     "200 OK",
                     {
                         "logs": read_log_tail(self.log_paths, lines),
                         "log_paths": [str(item) for item in self.log_paths],
+                        "log_files": log_files,
                         "log_exists": any(item.is_file() for item in self.log_paths),
+                        "log_limit_bytes": LOG_MAX_BYTES * (LOG_BACKUP_COUNT + 1),
                     },
                 )
             if path == "/api/account/refresh" and method == "POST":
@@ -929,10 +952,12 @@ class WebApp:
         cookies, profile = self.sessions.snapshot()
         stats: dict[str, int] = {}
         problem_counts: dict[str, int] = {"failed": 0, "permission": 0}
+        runs: list[dict[str, Any]] = []
         try:
             with StateStore(self.config.db_path) as state:
                 stats = state.stats()
                 problem_counts = state.problem_counts()
+                runs = state.recent_runs(RUN_HISTORY_LIMIT)
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
         dirs = []
@@ -967,6 +992,7 @@ class WebApp:
                 "skipped": stats.get("skipped_local", 0) + stats.get("skipped_remote", 0),
             },
             "sync": self.sync.status(),
+            "runs": runs,
         }
 
     def _diagnostics(self) -> dict[str, Any]:
@@ -1092,7 +1118,10 @@ def setup_logging(path: Path | None, level: str) -> None:
             path.parent.mkdir(parents=True, exist_ok=True)
             handlers.append(
                 RotatingFileHandler(
-                    path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+                    path,
+                    maxBytes=LOG_MAX_BYTES,
+                    backupCount=LOG_BACKUP_COUNT,
+                    encoding="utf-8",
                 )
             )
         except OSError:

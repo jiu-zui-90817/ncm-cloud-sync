@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.1.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.2.fpk`）。
 
 自行构建：
 
@@ -50,7 +50,7 @@ bash scripts/build-fnos.sh
 0.3.0 改了应用标识、包用户、数据目录和 Python 包名，应用中心不会把它当成 0.2.x 的升级。旧版本可以继续保留，确认新版本可用后再卸载。
 
 1. 停止旧应用，备份 `/var/apps/wy-music-cloud/var`；
-2. 安装 `ncm-cloud-sync-0.3.1.fpk`，启动一次让新数据目录生成，然后停止；
+2. 安装 `ncm-cloud-sync-0.3.2.fpk`，启动一次让新数据目录生成，然后停止；
 3. 把旧目录里的 `settings.json` 和 `data/` 复制到 `/var/apps/ncm-cloud-sync/var/`，确认属主是新的应用用户 `ncm-cloud-sync`；
 4. 启动新应用，检查账号、音乐目录、排除目录和通知配置；登录态失效时重新扫码；
 5. 确认同步正常后再卸载旧应用，卸载前不要删除旧数据目录。
@@ -104,7 +104,7 @@ Web UI 设置项：
 - **云盘对账**：每轮开始读取云盘列表（`privateCloud.md5`），MD5 已在云盘的直接跳过；`needUpload=false` 的补建单独显示为“补建”，不计入上传数和字节数；
 - **演练模式**：开启后自动同步也只检查不上传。
 
-保存后对下一轮同步生效。日志卡片显示最近日志；更多历史在数据目录的 `app.log`，进程 stdout/stderr 在 `app.out`（0.3.1 起分开，避免每条日志重复两次）。通知失败只记日志，不会中断同步；`settings.json` 里的通知 token 为敏感信息，请勿分享。
+保存后对下一轮同步生效。日志卡片显示最近日志、每个日志文件的大小与总上限（0.3.2 起 `app.log` 单文件 2 MB、保留 2 个备份，总上限 6 MB）；更多历史在数据目录的 `app.log`，进程 stdout/stderr 在 `app.out`（0.3.1 起分开，避免每条日志重复两次）。概览页还会显示最近 5 次执行记录，更早的记录会自动清理。通知失败只记日志，不会中断同步；`settings.json` 里的通知 token 为敏感信息，请勿分享。
 
 ### 8. 数据目录
 
@@ -129,12 +129,14 @@ Web UI 设置项：
 - `settings.json`：音乐目录、排除目录、自动同步、通知配置、同步间隔、请求间隔、日志级别；
 - `data/state.db`：SQLite 同步状态，去重核心；
 - `data/session.json`：登录态，敏感；
-- `app.log`：Python 日志 handler 写入的运行日志；
+- `app.log`：Python 日志 handler 写入的运行日志，单文件 2 MB 自动轮转，保留 2 个备份；
 - `app.out`：进程 stdout/stderr（0.3.1 起与 `app.log` 分开）。
 
 ### 9. 升级
 
 在应用中心用新 `.fpk` 覆盖安装即可。升级回调会保留设置、状态和登录态，只替换程序文件。升级前建议备份 `settings.json`、`data/state.db`、`data/session.json`。
+
+0.3.2 起应用包用户改为 `ncm-cloud-sync`。从 0.3.0/0.3.1 覆盖安装后，升级回调会把数据目录属主切到新用户；旧的 `wy-music-cloud` 系统用户不会自动删除，确认运行正常后可手动清理。若音乐目录提示无权限，在应用中心重新授权。
 
 ### 10. 备份与恢复
 
@@ -193,7 +195,7 @@ sudo rm -rf /var/apps/ncm-cloud-sync/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.1**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.2**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 

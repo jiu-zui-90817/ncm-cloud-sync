@@ -102,6 +102,7 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["settings"]["exclude_dirs"] == []
     assert data["sync"]["state"] == "idle"
     assert data["sync"]["can_pause"] is False
+    assert data["runs"] == []
     status, headers, _ = call(app, "/")
     assert status == "200 OK"
     assert headers["Content-Type"].startswith("text/html")
@@ -556,6 +557,30 @@ def test_diagnostics_and_log_paths(tmp_path: Path) -> None:
     assert status == "200 OK"
     assert logs["log_paths"]
     assert logs["log_exists"] is False
+    assert logs["log_files"][0]["path"].endswith("app.log")
+    assert logs["log_files"][0]["exists"] is False
+    assert logs["log_limit_bytes"] == 6 * 1024 * 1024
+
+
+def test_runs_api_and_status(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        for index in range(6):
+            run_id = state.start_run()
+            state.finish_run(run_id, scanned=index, uploaded=index)
+
+    status, _, data = call(app, "/api/status")
+    assert status == "200 OK"
+    assert len(data["runs"]) == 5
+    assert data["runs"][0]["uploaded"] == 5
+
+    status, _, data = call(app, "/api/runs", query="limit=99")
+    assert status == "200 OK"
+    assert len(data["runs"]) == 5
+
+    status, _, data = call(app, "/api/runs", query="limit=1")
+    assert status == "200 OK"
+    assert len(data["runs"]) == 1
 
 
 def test_static_page_has_cookie_login(tmp_path: Path) -> None:

@@ -102,6 +102,77 @@
     return date.toLocaleString("zh-CN", { hour12: false });
   }
 
+  function formatRunTime(value) {
+    var date = new Date(value);
+    if (isNaN(date.getTime())) {
+      return value || "-";
+    }
+    return date.toLocaleString("zh-CN", {
+      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    });
+  }
+
+  function formatRunDuration(started, finished) {
+    var start = new Date(started).getTime();
+    var end = new Date(finished).getTime();
+    if (isNaN(start) || isNaN(end) || end < start) {
+      return "-";
+    }
+    var seconds = Math.round((end - start) / 1000);
+    if (seconds < 60) {
+      return seconds + " 秒";
+    }
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+      return minutes + " 分 " + (seconds % 60) + " 秒";
+    }
+    return Math.floor(minutes / 60) + " 小时 " + (minutes % 60) + " 分";
+  }
+
+  function renderRuns(runs) {
+    var list = el("runHistory");
+    if (!list) {
+      return;
+    }
+    list.textContent = "";
+    if (!runs || !runs.length) {
+      var empty = document.createElement("li");
+      empty.className = "run-empty";
+      empty.textContent = "暂无执行记录";
+      list.appendChild(empty);
+      return;
+    }
+    runs.forEach(function (run) {
+      var item = document.createElement("li");
+      item.className = "run-row";
+      var head = document.createElement("div");
+      head.className = "run-head";
+      var when = document.createElement("strong");
+      when.textContent = formatRunTime(run.started_at) + " → " + formatRunTime(run.finished_at);
+      var duration = document.createElement("span");
+      duration.className = "run-duration";
+      duration.textContent = "耗时 " + formatRunDuration(run.started_at, run.finished_at);
+      head.appendChild(when);
+      head.appendChild(duration);
+      var stats = document.createElement("div");
+      stats.className = "run-stats";
+      ["扫描 " + (run.scanned || 0), "上传 " + (run.uploaded || 0), "跳过 " + (run.skipped || 0), "失败 " + (run.failed || 0)].forEach(function (text) {
+        var span = document.createElement("span");
+        span.textContent = text;
+        stats.appendChild(span);
+      });
+      item.appendChild(head);
+      item.appendChild(stats);
+      if (run.error) {
+        var error = document.createElement("p");
+        error.className = "run-error";
+        error.textContent = run.error;
+        item.appendChild(error);
+      }
+      list.appendChild(item);
+    });
+  }
+
   function formatInterval(seconds) {
     var value = Number(seconds || 0);
     if (value <= 0) {
@@ -307,6 +378,7 @@
       el("syncHint").textContent = "同步任务在后台运行，可随时关闭页面。";
     }
     renderLastRun(data.sync || {});
+    renderRuns(data.runs || []);
     renderSettings(data);
     if (!state.notifyDirty) {
       state.notifications = JSON.parse(JSON.stringify((data.settings && data.settings.notifications) || []));
@@ -476,6 +548,12 @@
     api("/api/logs?lines=200").then(function (data) {
       var view = el("logView");
       var paths = (data.log_paths || []).join("\n");
+      var files = (data.log_files || []).map(function (file) {
+        var name = String(file.path || "").split(/[\\/]/).pop();
+        return name + " " + (file.exists ? formatBytes(file.size) : "不存在");
+      });
+      var limit = data.log_limit_bytes ? " · 总上限 " + formatBytes(data.log_limit_bytes) : "";
+      el("logInfo").textContent = (files.join(" · ") || "暂无日志文件") + limit + " · 单个文件 2 MB 自动轮转";
       view.textContent = (paths ? "# 日志文件：" + paths + "\n\n" : "") + (data.logs || "暂无日志");
       view.scrollTop = view.scrollHeight;
     }).catch(function (error) {

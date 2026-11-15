@@ -56,6 +56,16 @@ def test_runs(tmp_path: Path) -> None:
         assert runs[0]["scanned"] == 2
 
 
+def test_runs_keep_only_recent_five(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        for index in range(6):
+            run_id = state.start_run()
+            state.finish_run(run_id, scanned=index, uploaded=index)
+        runs = state.recent_runs(10)
+        assert len(runs) == 5
+        assert [run["uploaded"] for run in runs] == [5, 4, 3, 2, 1]
+
+
 def test_problem_counts_files_and_reset(tmp_path: Path) -> None:
     with StateStore(tmp_path / "state.db") as state:
         state.mark_seen("ok.mp3", 100, 1)

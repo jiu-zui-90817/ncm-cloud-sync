@@ -75,6 +75,8 @@ class FileRecord:
 
 
 class StateStore:
+    RUN_HISTORY_LIMIT = 5
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -338,6 +340,12 @@ class StateStore:
                 failed = ?, error = ? WHERE id = ?
             """,
             (utc_now(), scanned, uploaded, skipped, failed, error, run_id),
+        )
+        # 运行记录只保留最近若干次，避免 SQLite 随长期运行无限增长。
+        self.conn.execute(
+            "DELETE FROM runs WHERE id NOT IN ("
+            "SELECT id FROM runs ORDER BY id DESC LIMIT ?)",
+            (self.RUN_HISTORY_LIMIT,),
         )
         self.conn.commit()
 

@@ -131,6 +131,18 @@
           </div>
           <p id="syncError" class="error-line hidden"></p>
         </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>最近同步</h2>
+              <p class="muted">只保留最近 5 次执行记录，更早的记录会自动清理。</p>
+            </div>
+          </div>
+          <ul id="runHistory" class="run-list">
+            <li class="run-empty">暂无执行记录</li>
+          </ul>
+        </section>
       </div>
 
       <div id="page-problems" class="page hidden">
@@ -279,6 +291,7 @@
               <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
             </div>
           </div>
+          <p id="logInfo" class="muted log-info">正在读取日志大小…</p>
           <pre id="logView" class="log-view">加载中…</pre>
           <pre id="diagnosticsView" class="log-view hidden"></pre>
         </section>

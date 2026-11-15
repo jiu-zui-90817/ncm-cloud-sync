@@ -29,6 +29,9 @@ dist/
 # Runtime data
 data/
 config/
+!deploy/fnos/ncm-cloud-sync/config/
+!deploy/fnos/ncm-cloud-sync/config/**
+deploy/fnos/ncm-cloud-sync/config/resource
 .env
 *.db
 *.db-journal

@@ -1,0 +1,7 @@
+{
+  "defaults": {
+    "run-as": "package"
+  },
+  "username": "ncm-cloud-sync",
+  "groupname": "ncm-cloud-sync"
+}

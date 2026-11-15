@@ -55,7 +55,7 @@
           └─ 仅补建条目 ──► linked（不计入上传数/字节）
 ```
 
-去重顺序是“先本地、再云盘列表、最后云端字节”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。0.2.20 起 Web UI 分为概览 / 文件问题 / 设置 / 通知 / 日志，失败与无权限可查看明细并重置重试；0.2.21 起增加「关于」页和检查更新，排除规则命中的旧记录自动隐藏为 ignored；后台自动同步可单独关闭；终止只结束当前一轮，自动同步仍按计划运行，只有暂停才会暂停自动同步直到点“继续”。0.3.1 起每轮同步前先读取云盘列表并按 MD5 对账，已在云盘的文件直接跳过；`needUpload=false` 的补建单独显示为“补建”，不再计入上传数和字节数；stdout/stderr 改写到 `app.out`，`app.log` 不再每条重复两次。
+去重顺序是“先本地、再云盘列表、最后云端字节”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。0.2.20 起 Web UI 分为概览 / 文件问题 / 设置 / 通知 / 日志，失败与无权限可查看明细并重置重试；0.2.21 起增加「关于」页和检查更新，排除规则命中的旧记录自动隐藏为 ignored；后台自动同步可单独关闭；终止只结束当前一轮，自动同步仍按计划运行，只有暂停才会暂停自动同步直到点“继续”。0.3.1 起每轮同步前先读取云盘列表并按 MD5 对账，已在云盘的文件直接跳过；`needUpload=false` 的补建单独显示为“补建”，不再计入上传数和字节数；stdout/stderr 改写到 `app.out`，`app.log` 不再每条重复两次。0.3.2 起包用户改为 `ncm-cloud-sync`，概览新增最近 5 次执行记录（更早记录自动清理）；`app.log` 单文件 2 MB、保留 2 个备份，总上限 6 MB。
 
 ## 安装（飞牛 NAS，推荐）
 
@@ -69,7 +69,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.1.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.2.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -88,7 +88,7 @@ bash scripts/build-fnos.sh
 0.3.0 改了应用标识、包用户、数据目录和 Python 包名，应用中心不会把它当成 0.2.x 的升级。旧版本可以继续保留，确认新版本可用后再卸载。
 
 1. 停止旧应用，备份 `/var/apps/wy-music-cloud/var`；
-2. 安装 `ncm-cloud-sync-0.3.1.fpk`，启动一次让新数据目录生成，然后停止；
+2. 安装 `ncm-cloud-sync-0.3.2.fpk`，启动一次让新数据目录生成，然后停止；
 3. 把旧目录里的 `settings.json` 和 `data/` 复制到 `/var/apps/ncm-cloud-sync/var/`，确认属主是新的应用用户 `ncm-cloud-sync`；
 4. 启动新应用，检查账号、音乐目录、排除目录和通知配置；登录态失效时重新扫码；
 5. 确认同步正常后再卸载旧应用，卸载前不要删除旧数据目录。
@@ -170,7 +170,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.1** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.2** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -206,7 +206,7 @@ var/
 
 **日志每条都重复两次**
 
-0.3.0 及更早版本同时把 stdout 重定向到 `app.log`，又用 RotatingFileHandler 写 `app.log`，同一条日志会落两次。0.3.1 起 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写；升级后停止再启动，旧日志里的重复行不会消失，新日志正常。
+0.3.0 及更早版本同时把 stdout 重定向到 `app.log`，又用 RotatingFileHandler 写 `app.log`，同一条日志会落两次。0.3.1 起 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写；升级后停止再启动，旧日志里的重复行不会消失，新日志正常。0.3.2 起 `app.log` 单文件上限 2 MB、保留 2 个备份，总占用最多约 6 MB；日志页会显示当前大小和上限。
 
 **很多文件提示没有读取权限 / 失败里“无权限”很多**
 
@@ -227,6 +227,10 @@ var/
 **升级后设置还在吗**
 
 在。设置和状态都在应用数据目录；升级回调只更新程序，不删除数据。
+
+**为什么系统用户还是 wy-music-cloud**
+
+0.3.0/0.3.1 的 `privilege` 漏改，安装后仍创建了旧用户。0.3.2 已改为 `ncm-cloud-sync`；覆盖安装并重启应用后会按新用户运行，数据目录属主也会在升级回调里调整。旧的 `wy-music-cloud` 系统用户不会被自动删除，确认新版本运行正常后可在系统用户管理里清理。若音乐目录仍提示无权限，请在应用中心重新授权该目录。
 
 ## 可选：Docker / 命令行
 
