@@ -266,10 +266,20 @@ def test_problems_api_lists_and_retries(tmp_path: Path) -> None:
     assert status == "200 OK"
     assert data["counts"] == {"failed": 1, "permission": 1}
     assert [item["path"] for item in data["items"]] == ["denied.mp3"]
+    assert data["items"][0]["kind"] == "permission"
+
+    status, _, data = call(app, "/api/problems")
+    assert status == "200 OK"
+    assert data["kind"] == "all"
+    assert {item["path"]: item["kind"] for item in data["items"]} == {
+        "boom.mp3": "failed",
+        "denied.mp3": "permission",
+    }
 
     status, _, data = call(app, "/api/status")
     assert data["stats"]["failed"] == 1
     assert data["stats"]["permission"] == 1
+    assert data["stats"]["problems_total"] == 2
 
     status, _, data = call(app, "/api/problems/retry", method="POST", body={"kind": "failed"})
     assert status == "200 OK"
@@ -594,7 +604,8 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert "forceRecheck" in html
     assert "loginDiagnosticsButton" in html
     assert "copyDiagnosticsButton" in html
-    assert "statPermission" in html
+    assert "statProblems" in html
+    assert "statProblemBreakdown" in html
     assert "rateLimit" in html
     assert "excludeDirs" in html
     assert "pauseButton" in html

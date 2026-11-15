@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -13,7 +13,7 @@ from .client import CloudClient, UploadResult
 from .config import Config
 from .errors import AuthError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
-from .scanner import AudioFile, path_is_excluded, scan
+from .scanner import AudioFile, path_is_excluded, scan_with_report
 from .state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,13 @@ ProgressCallback = Callable[[str, dict[str, Any]], None]
 @dataclass
 class SyncStats:
     scanned: int = 0
+    processed: int = 0
+    cloud_songs: int = 0
+    scan_unsupported: int = 0
+    scan_excluded: int = 0
+    scan_unreadable: int = 0
+    scan_missing_roots: int = 0
+    unsupported_extensions: dict[str, int] = field(default_factory=dict)
     up_to_date: int = 0
     uploaded: int = 0
     linked: int = 0
@@ -46,20 +53,38 @@ class SyncStats:
     def skipped(self) -> int:
         return self.up_to_date + self.skipped_local + self.skipped_remote
 
+    @property
+    def filtered(self) -> int:
+        return (
+            self.scan_unsupported
+            + self.scan_excluded
+            + self.scan_unreadable
+        )
+
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["skipped"] = self.skipped
+        data["filtered"] = self.filtered
         return data
 
     def summary(self) -> str:
         return (
-            f"扫描 {self.scanned}，上传 {self.uploaded}，"
+            f"扫描 {self.scanned}"
+            + (
+                f"（实际处理 {self.processed}）"
+                if self.processed != self.scanned
+                else ""
+            )
+            + "，"
+            + (f"云盘 {self.cloud_songs} 首，" if self.cloud_songs else "")
+            + f"上传 {self.uploaded}，"
             + (f"补建 {self.linked}，" if self.linked else "")
             + f"已存在/跳过 {self.skipped}（本地重复 {self.skipped_local}，"
             f"云端已有 {self.skipped_remote}，未变更 {self.up_to_date}），"
             f"失败 {self.failed}"
             + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
             + (f"，忽略 {self.ignored}" if self.ignored else "")
+            + (f"，扫描过滤 {self.filtered}" if self.filtered else "")
             + f"，缺失 {self.missing}，"
             f"上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
@@ -156,26 +181,44 @@ class Syncer:
                 len(self.config.exclude_dirs),
                 ", ".join(str(item) for item in self.config.exclude_dirs),
             )
-        files = list(
-            scan(
-                self.config.music_dirs,
-                self.config.extensions,
-                self.config.exclude,
-                self.config.exclude_dirs,
-            )
+        files, report = scan_with_report(
+            self.config.music_dirs,
+            self.config.extensions,
+            self.config.exclude,
+            self.config.exclude_dirs,
         )
+        stats.scanned = len(files)
+        stats.scan_unsupported = report.unsupported
+        stats.scan_excluded = report.excluded + report.excluded_dirs
+        stats.scan_unreadable = report.unreadable
+        stats.scan_missing_roots = report.missing_roots
+        stats.unsupported_extensions = dict(report.unsupported_suffixes)
         known = {str(item.path) for item in files}
-        logger.info("发现 %d 个候选音频文件", len(files))
+        logger.info(
+            "发现 %d 个候选音频文件；扫描过滤 %d（扩展名 %d，名称/目录排除 %d，不可读 %d），缺失音乐目录 %d",
+            len(files),
+            report.filtered,
+            report.unsupported,
+            report.excluded + report.excluded_dirs,
+            report.unreadable,
+            report.missing_roots,
+        )
         self._cloud_md5 = {}
         loader = getattr(self.client, "cloud_song_md5_map", None)
         if callable(loader):
             try:
                 self._cloud_md5 = dict(loader() or {})
+                stats.cloud_songs = int(
+                    getattr(self.client, "last_cloud_song_count", len(self._cloud_md5))
+                    or 0
+                )
             except Exception as exc:
                 logger.warning("读取云盘列表失败，本轮跳过云端对账: %s", exc)
             else:
                 logger.info(
-                    "云盘已有 %d 个不同 MD5，已用于同步前对账", len(self._cloud_md5)
+                    "云盘已有 %d 首（%d 个不同 MD5），已用于同步前对账",
+                    stats.cloud_songs,
+                    len(self._cloud_md5),
                 )
         processed = 0
         try:
@@ -199,7 +242,7 @@ class Syncer:
                     logger.info("已达到 --limit %d，提前结束", self.limit)
                     break
                 processed += 1
-                stats.scanned += 1
+                stats.processed = processed
                 try:
                     self._process(audio, stats)
                 except AuthError:

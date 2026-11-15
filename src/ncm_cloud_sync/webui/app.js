@@ -11,7 +11,7 @@
     qrTimer: null,
     toastTimer: null,
     page: "overview",
-    problemKind: "failed",
+    problemKind: "all",
     problemCounts: { failed: 0, permission: 0 },
     notifyTypes: [],
     notifications: [],
@@ -304,10 +304,44 @@
       el("lastRun").textContent = "尚未运行";
     } else {
       var stats = last.stats || {};
-      var text = formatDate(last.at) + " · 上传 " + (stats.uploaded || 0) +
+      var text = formatDate(last.at);
+      if (stats.scanned != null) {
+        text += " · 扫描 " + (stats.scanned || 0);
+      }
+      if (stats.processed != null && stats.processed !== stats.scanned) {
+        text += " · 处理 " + stats.processed;
+      }
+      text += " · 上传 " + (stats.uploaded || 0) +
         " · 跳过 " + (stats.skipped || 0) + " · 失败 " + (stats.failed || 0);
       if (stats.permission_denied) {
         text += "（无权限 " + stats.permission_denied + "）";
+      }
+      if (stats.cloud_songs) {
+        text += " · 云盘 " + stats.cloud_songs + " 首";
+      }
+      var filtered = stats.filtered || ((stats.scan_unsupported || 0) +
+        (stats.scan_excluded || 0) + (stats.scan_unreadable || 0));
+      if (filtered) {
+        var details = [];
+        if (stats.scan_unsupported) {
+          var suffixes = stats.unsupported_extensions || {};
+          var labels = Object.keys(suffixes).slice(0, 3).map(function (ext) {
+            return (ext || "无扩展名") + " " + suffixes[ext];
+          });
+          details.push("扩展名 " + stats.scan_unsupported +
+            (labels.length ? "（" + labels.join("、") + "）" : ""));
+        }
+        if (stats.scan_excluded) {
+          details.push("排除 " + stats.scan_excluded);
+        }
+        if (stats.scan_unreadable) {
+          details.push("不可读 " + stats.scan_unreadable);
+        }
+        if (stats.scan_missing_roots) {
+          details.push("目录缺失 " + stats.scan_missing_roots);
+        }
+        text += " · 本地过滤 " + filtered +
+          (details.length ? "（" + details.join(" / ") + "）" : "");
       }
       if (stats.deferred) {
         text += " · 待续 " + stats.deferred;
@@ -362,8 +396,10 @@
     var stats = data.stats || {};
     el("statUploaded").textContent = stats.uploaded || 0;
     el("statPending").textContent = stats.pending || 0;
-    el("statFailed").textContent = stats.failed || 0;
-    el("statPermission").textContent = stats.permission || 0;
+    var failed = stats.failed || 0;
+    var permission = stats.permission || 0;
+    el("statProblems").textContent = failed + permission;
+    el("statProblemBreakdown").textContent = "失败 " + failed + " · 无权限 " + permission;
     el("statMissing").textContent = stats.missing || 0;
     el("statSkipped").textContent = stats.skipped || 0;
     if (!data.sync.auto_sync) {
@@ -436,6 +472,8 @@
 
   function renderProblems(data) {
     state.problemCounts = data.counts || { failed: 0, permission: 0 };
+    el("problemAllCount").textContent =
+      (state.problemCounts.failed || 0) + (state.problemCounts.permission || 0);
     el("problemFailedCount").textContent = state.problemCounts.failed || 0;
     el("problemPermissionCount").textContent = state.problemCounts.permission || 0;
     var list = el("problemList");
@@ -461,6 +499,8 @@
       meta.appendChild(make("span", "", "最后更新 " + formatDate(item.updated_at)));
       meta.appendChild(make("span", "", "大小 " + formatBytes(item.size)));
       meta.appendChild(make("span", "", "尝试 " + (item.attempts || 0) + " 次"));
+      meta.appendChild(make("span", "problem-kind " + (item.kind || "failed"),
+        item.kind === "permission" ? "无权限" : "失败"));
       row.appendChild(meta);
       if (item.last_error) {
         row.appendChild(make("p", "problem-error", item.last_error));
@@ -982,7 +1022,7 @@
 
   function bindProblemEntry(node) {
     node.addEventListener("click", function () {
-      state.problemKind = node.getAttribute("data-problem-kind") || "failed";
+      state.problemKind = node.getAttribute("data-problem-kind") || "all";
       updateProblemSwitches();
       showPage("problems");
     });

@@ -79,6 +79,8 @@ def test_problem_counts_files_and_reset(tmp_path: Path) -> None:
         denied = state.problem_files(kind="permission")
         assert [item["path"] for item in denied] == ["denied.mp3"]
         assert "没有读取权限" in denied[0]["last_error"]
+        assert denied[0]["kind"] == "permission"
+        assert failed[0]["kind"] == "failed"
         assert {item["path"] for item in state.problem_files(kind="all")} == {"ok.mp3", "denied.mp3"}
 
         assert state.reset_problems(kind="permission") == 1

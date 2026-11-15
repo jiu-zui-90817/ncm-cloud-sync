@@ -351,7 +351,8 @@ h2 {
 
 .sync-meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 0.8fr);
+  align-items: start;
   gap: 12px;
   margin-top: 18px;
   padding-top: 16px;
@@ -373,6 +374,12 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sync-meta > div:first-child span:last-child {
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.55;
 }
 
 .progress-box {
@@ -779,6 +786,21 @@ textarea:focus {
   margin-top: 6px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.problem-kind {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fdecee;
+  color: #a9001b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.problem-kind.permission {
+  background: #fff4e5;
+  color: #9a5a00;
 }
 
 .problem-error {

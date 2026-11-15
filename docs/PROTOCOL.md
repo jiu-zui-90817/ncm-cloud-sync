@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.3 起 `/api/status.stats` 新增 `problems_total`（失败 + 无权限）；`GET /api/problems` 默认 `kind=all`，每行新增 `kind`（failed/permission）。最近一次运行统计新增 `processed`、`cloud_songs`、`scan_unsupported`、`scan_excluded`、`scan_unreadable`、`scan_missing_roots`、`unsupported_extensions` 和 `filtered`；`scanned` 改为本地候选数，实际处理数看 `processed`。
 - 0.3.2 起 `runs` 表只保留最近 5 次执行记录，`finish_run` 写入后自动删除更早行；`GET /api/runs?limit=` 返回记录（limit 上限 5），`/api/status` 也带 `runs`。`app.log` 单文件 2 MB、保留 2 个备份，`/api/logs` 返回 `log_files`（path/exists/size）和 `log_limit_bytes`。
 
 ## 14. 参考

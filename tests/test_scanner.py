@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ncm_cloud_sync.scanner import path_is_excluded, scan
+from ncm_cloud_sync.scanner import path_is_excluded, scan, scan_with_report
 
 
 def test_scan_filters_extension_and_excludes(tmp_path: Path) -> None:
@@ -20,6 +20,36 @@ def test_scan_filters_extension_and_excludes(tmp_path: Path) -> None:
     assert {item.path.name for item in found} == {"a.mp3", "b.flac"}
     assert all(item.size > 0 for item in found)
     assert {item.suffix for item in found} == {"mp3", "flac"}
+
+
+def test_scan_report_explains_filtered_files(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "keep.mp3").write_bytes(b"a")
+    (music / "notes.txt").write_text("notes", encoding="utf-8")
+    (music / ".hidden").mkdir()
+    (music / ".hidden" / "hidden.mp3").write_bytes(b"b")
+    (music / "@eaDir").mkdir()
+    (music / "@eaDir" / "cache.mp3").write_bytes(b"c")
+    excluded = music / "有声书"
+    excluded.mkdir()
+    (excluded / "skip.mp3").write_bytes(b"d")
+
+    files, report = scan_with_report(
+        [music, tmp_path / "missing"],
+        ["mp3"],
+        [".*", "@eaDir"],
+        [excluded],
+    )
+
+    assert [item.path.name for item in files] == ["keep.mp3"]
+    assert report.candidates == 1
+    assert report.unsupported == 1
+    assert report.unsupported_suffixes == {"txt": 1}
+    assert report.excluded == 2
+    assert report.excluded_dirs == 1
+    assert report.missing_roots == 1
+    assert report.filtered == 4
 
 
 def test_scan_skips_excluded_directory_tree(tmp_path: Path) -> None:

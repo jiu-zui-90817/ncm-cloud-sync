@@ -164,7 +164,9 @@ class StateStore:
         else:
             raise StateError(f"未知的问题类型: {kind}")
         rows = self.conn.execute(
-            "SELECT path, size, attempts, last_error, updated_at FROM files "
+            "SELECT path, size, attempts, last_error, updated_at, "
+            "CASE WHEN last_error LIKE '%没有读取权限%' "
+            "THEN 'permission' ELSE 'failed' END AS kind FROM files "
             f"WHERE {where} ORDER BY updated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()

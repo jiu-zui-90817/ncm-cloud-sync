@@ -191,7 +191,8 @@ def test_limit(tmp_path: Path) -> None:
     client = FakeClient()
     with StateStore(config.db_path) as state:
         stats = Syncer(config, client, state, limit=1).run_once()
-        assert stats.scanned == 1
+        assert stats.scanned == 2
+        assert stats.processed == 1
         assert len(client.calls) == 1
 
 
@@ -206,6 +207,8 @@ def test_rate_limit_aborts_run(tmp_path: Path) -> None:
         stats = Syncer(config, client, state).run_once()
         assert stats.aborted is True
         assert stats.failed == 0
+        assert stats.scanned == 3
+        assert stats.processed == 1
         assert stats.deferred == 3
         assert "405" in stats.error
         assert state.get(music / "a.mp3").status == "pending"
@@ -226,7 +229,8 @@ def test_pause_event_pauses_run(tmp_path: Path) -> None:
         assert stats.paused is True
         assert stats.stopped is False
         assert stats.aborted is True
-        assert stats.scanned == 0
+        assert stats.scanned == 3
+        assert stats.processed == 0
         assert stats.deferred == 3
         assert client.calls == []
         assert "已暂停" in stats.summary()
@@ -246,6 +250,8 @@ def test_stop_event_stops_run(tmp_path: Path) -> None:
         assert stats.stopped is True
         assert stats.paused is False
         assert stats.aborted is True
+        assert stats.scanned == 2
+        assert stats.processed == 0
         assert stats.deferred == 2
         assert "已终止" in stats.error
         assert "已终止" in stats.summary()

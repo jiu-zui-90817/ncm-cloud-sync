@@ -863,7 +863,7 @@ class WebApp:
                 return self._json(start_response, "200 OK", self.sync.status())
             if path == "/api/problems" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
-                kind = str((query.get("kind") or ["failed"])[0] or "failed")
+                kind = str((query.get("kind") or ["all"])[0] or "all")
                 limit = _as_int((query.get("limit") or ["200"])[0], 200, 1, 500)
                 with StateStore(self.config.db_path) as state:
                     counts = state.problem_counts()
@@ -987,6 +987,10 @@ class WebApp:
                 "pending": stats.get("pending", 0),
                 "failed": problem_counts.get("failed", 0),
                 "permission": problem_counts.get("permission", 0),
+                "problems_total": (
+                    problem_counts.get("failed", 0)
+                    + problem_counts.get("permission", 0)
+                ),
                 "missing": stats.get("missing", 0),
                 "uploading": stats.get("uploading", 0),
                 "skipped": stats.get("skipped_local", 0) + stats.get("skipped_remote", 0),

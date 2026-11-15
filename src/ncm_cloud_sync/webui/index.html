@@ -93,8 +93,7 @@
         <section class="stats-grid">
           <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
           <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong></article>
-          <article class="stat clickable" data-problem-kind="failed" tabindex="0" role="button" title="查看失败文件"><span class="stat-label">失败</span><strong id="statFailed">0</strong><small class="stat-link">查看明细</small></article>
-          <article class="stat clickable" data-problem-kind="permission" tabindex="0" role="button" title="查看无权限文件"><span class="stat-label">无权限</span><strong id="statPermission">0</strong><small class="stat-link">查看明细</small></article>
+          <article class="stat clickable" data-problem-kind="all" tabindex="0" role="button" title="查看失败和无权限文件"><span class="stat-label">问题文件</span><strong id="statProblems">0</strong><small class="stat-link" id="statProblemBreakdown">失败 0 · 无权限 0</small></article>
           <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
           <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
         </section>
@@ -150,7 +149,7 @@
           <div class="card-head">
             <div>
               <h2>文件问题</h2>
-              <p class="muted">失败和无权限文件会保留在这里，修复权限或网络后可以重试。</p>
+              <p class="muted">失败和无权限文件会保留在这里并标注类型，修复权限或网络后可以重试。</p>
             </div>
             <div class="actions">
               <button id="refreshProblems" class="btn ghost" type="button">刷新</button>
@@ -158,7 +157,8 @@
             </div>
           </div>
           <div class="problem-switch">
-            <button class="chip active" type="button" data-problem-kind="failed">失败 <span id="problemFailedCount">0</span></button>
+            <button class="chip active" type="button" data-problem-kind="all">全部 <span id="problemAllCount">0</span></button>
+            <button class="chip" type="button" data-problem-kind="failed">失败 <span id="problemFailedCount">0</span></button>
             <button class="chip" type="button" data-problem-kind="permission">无权限 <span id="problemPermissionCount">0</span></button>
           </div>
           <div id="problemEmpty" class="empty-state hidden">当前分类没有文件。</div>

@@ -146,6 +146,7 @@ class CloudClient:
         self._nos_host: str | None = None
         self._nos_host_at = 0.0
         self._device_ip: str | None = None
+        self.last_cloud_song_count = 0
         self._throttle_lock = threading.Lock()
         self._last_request_at = 0.0
         self._http = httpx.Client(
@@ -594,7 +595,9 @@ class CloudClient:
         只取顶层会得到空集合，导致本地明明已在云盘仍反复走 info/v2。
         """
         mapping: dict[str, int] = {}
-        for song in self.cloud_songs():
+        songs = self.cloud_songs()
+        self.last_cloud_song_count = len(songs)
+        for song in songs:
             private = song.get("privateCloud")
             detail = private if isinstance(private, dict) else song
             md5 = str(detail.get("md5") or song.get("md5") or "").strip().lower()
