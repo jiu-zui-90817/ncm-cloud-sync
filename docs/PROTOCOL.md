@@ -164,8 +164,10 @@ POST https://music.163.com/weapi/upload/cloud/info/v2
 weapi 明文：
 
 ```json
-{"md5":"<md5>","songid":"<check 返回的 songId>","filename":"<文件名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":"<token A 的 resourceId>"}
+{"md5":"<md5>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<token A 的 resourceId 整数>}
 ```
+
+字段要求：`songid` 仅在 check 返回非空 `songId` 时带上（字符串），没有匹配歌曲时必须省略，不要传 0；`resourceId` 必须是整数，传字符串会被判为参数错误并返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
 
 标签缺失时回退：`song` 用文件名，`album` 用“未知专辑”，`artist` 用“未知艺术家”。
 

@@ -596,26 +596,38 @@ class CloudClient:
         self,
         *,
         md5: str,
-        song_id: int,
-        name: str,
+        song_id: int | None,
+        filename: str,
+        song: str,
         album: str,
         artist: str,
-        resource_id: str,
+        resource_id: int | str,
         bitrate: str = "999000",
     ) -> int:
-        body = self._weapi(
-            "/api/upload/cloud/info/v2",
-            {
-                "md5": md5,
-                "songid": song_id,
-                "filename": name,
-                "song": name,
-                "album": album,
-                "artist": artist,
-                "bitrate": bitrate,
-                "resourceId": resource_id,
-            },
-        )
+        payload: dict[str, Any] = {
+            "md5": md5,
+            "filename": filename,
+            "song": song,
+            "album": album,
+            "artist": artist,
+            "bitrate": bitrate,
+            # 官方客户端把 resourceId 作为整数提交；传字符串会得到 400 接口调用失败。
+            "resourceId": _as_int(resource_id, 0),
+        }
+        # songid 是查重接口返回的字符串；没有匹配歌曲时必须省略，不能传 0。
+        if song_id:
+            payload["songid"] = str(song_id)
+        try:
+            body = self._weapi("/api/upload/cloud/info/v2", payload)
+        except ApiError as exc:
+            logger.error(
+                "提交云盘信息失败: filename=%r songid=%r resourceId=%r error=%s",
+                filename,
+                payload.get("songid"),
+                payload.get("resourceId"),
+                exc,
+            )
+            raise
         new_id = _as_int(body.get("songId") or body.get("songid") or song_id, 0)
         if new_id <= 0:
             raise UploadError(f"提交云盘信息失败: {body}")
@@ -664,11 +676,12 @@ class CloudClient:
             logger.info("文件内容已在网易云对象存储，补建云盘条目: %s", path)
         song_id = self.finish_upload(
             md5=md5,
-            song_id=check["song_id"] or 0,
-            name=name,
+            song_id=check["song_id"],
+            filename=path.name,
+            song=name,
             album=display_album(tags),
             artist=display_artist(tags),
-            resource_id=str(resource.get("resourceId", "")),
+            resource_id=resource.get("resourceId", 0),
         )
         self.publish(song_id)
         return UploadResult(True, song_id=song_id, reason="uploaded", cloud_name=name)

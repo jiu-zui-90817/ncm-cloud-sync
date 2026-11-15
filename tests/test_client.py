@@ -76,6 +76,56 @@ def test_client_adds_pc_cookie_defaults() -> None:
     assert client.cookies["appver"] == "2.7.1.198277"
 
 
+def test_finish_upload_matches_official_payload() -> None:
+    client = make_client()
+    captured: dict = {}
+
+    def fake_weapi(path, payload=None, **kwargs):
+        assert path == "/api/upload/cloud/info/v2"
+        captured.update(payload)
+        return {"code": 200, "songId": "123", "songIdLong": 123}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    new_id = client.finish_upload(
+        md5="abc",
+        song_id=None,
+        filename="A - B.mp3",
+        song="B",
+        album="未知专辑",
+        artist="A",
+        resource_id=36656729598,
+    )
+    assert new_id == 123
+    assert captured["resourceId"] == 36656729598
+    assert isinstance(captured["resourceId"], int)
+    assert "songid" not in captured
+    assert captured["filename"] == "A - B.mp3"
+    assert captured["song"] == "B"
+
+
+def test_finish_upload_string_song_id_and_resource_id() -> None:
+    client = make_client()
+    captured: dict = {}
+
+    def fake_weapi(path, payload=None, **kwargs):
+        captured.update(payload)
+        return {"code": 200, "songId": "7"}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    new_id = client.finish_upload(
+        md5="abc",
+        song_id=7,
+        filename="A.mp3",
+        song="A",
+        album="未知专辑",
+        artist="A",
+        resource_id="42",
+    )
+    assert new_id == 7
+    assert captured["songid"] == "7"
+    assert captured["resourceId"] == 42
+
+
 def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "whatever.mp3"
     path.write_bytes(b"x")
@@ -87,7 +137,7 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     def alloc(md5, name, ext, *, bucket=""):
         assert bucket == "", "needUpload=false 时不应再分配 NOS 对象"
         events.append("alloc")
-        return {"resourceId": "resource-id"}
+        return {"resourceId": 36656729598}
 
     client.alloc_token = alloc  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not upload bytes"))  # type: ignore[method-assign]
@@ -100,7 +150,9 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     assert result.reason == "uploaded"
     assert result.song_id == 7
     assert captured["song_id"] == 7
-    assert captured["resource_id"] == "resource-id"
+    assert captured["resource_id"] == 36656729598
+    assert captured["filename"] == "whatever.mp3"
+    assert captured["song"] == "晴天"
     assert events == ["alloc", "pub:7"]
 
 
