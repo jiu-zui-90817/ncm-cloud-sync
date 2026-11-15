@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .errors import ConfigError
+from .notify import mask_channels, normalize_channels
 
 DEFAULT_CONFIG_CANDIDATES = (Path("config.yaml"), Path("/config/config.yaml"))
 DEFAULT_AUDIO_EXTENSIONS = (
@@ -86,6 +88,9 @@ class Config:
     max_upload_size: int = 0
     exclude: tuple[str, ...] = (".*", "@eaDir", "#recycle", "lost+found")
     exclude_dirs: tuple[Path, ...] = ()
+    auto_sync: bool = True
+    notify_on: str = "always"
+    notify_channels: tuple[dict[str, Any], ...] = ()
     dry_run: bool = False
     log_level: str = "INFO"
     config_path: Path | None = None
@@ -129,6 +134,9 @@ class Config:
             "max_upload_size": self.max_upload_size,
             "exclude": list(self.exclude),
             "exclude_dirs": [str(path) for path in self.exclude_dirs],
+            "auto_sync": self.auto_sync,
+            "notify_on": self.notify_on,
+            "notify_channels": mask_channels(self.notify_channels),
             "dry_run": self.dry_run,
             "log_level": self.log_level,
         }
@@ -180,6 +188,12 @@ class Config:
             values["exclude_dirs"] = tuple(
                 _resolve_path(item, base) for item in _as_list(raw["exclude_dirs"])
             )
+        if "auto_sync" in raw:
+            values["auto_sync"] = parse_bool(raw["auto_sync"], True)
+        if "notify_on" in raw:
+            values["notify_on"] = str(raw["notify_on"]).strip().lower()
+        if "notify_channels" in raw:
+            values["notify_channels"] = tuple(normalize_channels(raw["notify_channels"]))
         if "dry_run" in raw:
             values["dry_run"] = parse_bool(raw["dry_run"])
         if "log_level" in raw:
@@ -280,6 +294,18 @@ class Config:
                     values[key] = type(getattr(cls, key))(value)
                 except ValueError as exc:
                     raise ConfigError(f"{name} 不是合法数字: {value}") from exc
+        auto_sync = text("WY_MUSIC_AUTO_SYNC")
+        if auto_sync is not None:
+            values["auto_sync"] = parse_bool(auto_sync, True)
+        notify_on = text("WY_MUSIC_NOTIFY_ON")
+        if notify_on:
+            values["notify_on"] = notify_on.lower()
+        notify_channels = text("WY_MUSIC_NOTIFY_CHANNELS")
+        if notify_channels:
+            try:
+                values["notify_channels"] = tuple(normalize_channels(json.loads(notify_channels)))
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise ConfigError(f"WY_MUSIC_NOTIFY_CHANNELS 不是合法 JSON: {exc}") from exc
         dry_run = text("WY_MUSIC_DRY_RUN")
         if dry_run is not None:
             values["dry_run"] = parse_bool(dry_run)

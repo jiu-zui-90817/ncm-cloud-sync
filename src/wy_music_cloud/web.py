@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 else:  # wsgiref.types 只在 Python 3.11+ 存在
     StartResponse = Any
 
-from . import __version__
+from . import __version__, notify
 from .client import CloudClient
 from .config import Config
 from .cookies import ensure_defaults, parse_cookie
@@ -57,6 +57,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "dry_run": False,
     "log_level": "INFO",
     "exclude_dirs": [],
+    "auto_sync": True,
+    "notify_on": "always",
+    "notifications": [],
 }
 ALLOWED_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 STATIC_FILES = {
@@ -253,6 +256,14 @@ class SettingsStore:
                 if str(item).strip() and Path(str(item)).expanduser().is_absolute()
             ]
         data["dry_run"] = _as_bool(raw.get("dry_run"), False)
+        data["auto_sync"] = _as_bool(raw.get("auto_sync"), True)
+        notify_on = str(raw.get("notify_on") or "always").lower()
+        data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
+        try:
+            data["notifications"] = notify.normalize_channels(raw.get("notifications"))
+        except ValueError as exc:
+            logger.warning("通知设置无效，已忽略: %s", exc)
+            data["notifications"] = []
         level = str(raw.get("log_level") or data["log_level"]).upper()
         data["log_level"] = level if level in ALLOWED_LOG_LEVELS else "INFO"
         return data
@@ -266,6 +277,12 @@ class SettingsStore:
             payload.get("exclude_dirs") or [], data["music_dirs"]
         )
         data["dry_run"] = _as_bool(payload.get("dry_run"), False)
+        data["auto_sync"] = _as_bool(payload.get("auto_sync"), True)
+        notify_on = str(payload.get("notify_on") or "always").lower()
+        if notify_on not in {"always", "failure", "success", "never"}:
+            raise ValueError("通知时机必须是 always/failure/success/never")
+        data["notify_on"] = notify_on
+        data["notifications"] = notify.normalize_channels(payload.get("notifications") or [])
         level = str(payload.get("log_level") or "INFO").upper()
         if level not in ALLOWED_LOG_LEVELS:
             raise ValueError("日志级别必须是 DEBUG/INFO/WARNING/ERROR")
@@ -292,6 +309,11 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
             Path(str(item)).expanduser()
             for item in (settings.get("exclude_dirs") or [])
         )
+    config.auto_sync = bool(settings.get("auto_sync", config.auto_sync))
+    notify_on = str(settings.get("notify_on") or config.notify_on).lower()
+    if notify_on in {"always", "failure", "success", "never"}:
+        config.notify_on = notify_on
+    config.notify_channels = tuple(settings.get("notifications") or [])
     config.dry_run = bool(settings.get("dry_run", config.dry_run))
     level = str(settings.get("log_level") or config.log_level).upper()
     if level in ALLOWED_LOG_LEVELS:
@@ -311,6 +333,9 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["interval"] = config.interval
     settings["rate_limit"] = config.rate_limit
     settings["exclude_dirs"] = [str(path) for path in config.exclude_dirs]
+    settings["auto_sync"] = config.auto_sync
+    settings["notify_on"] = config.notify_on
+    settings["notifications"] = list(config.notify_channels)
     settings["dry_run"] = config.dry_run
     settings["log_level"] = config.log_level
     return settings
@@ -552,7 +577,6 @@ class SyncManager:
             if not self._running:
                 return False
             self._stop_run.set()
-            self._auto_paused = True
             self._state = "stopping"
             return True
 
@@ -576,6 +600,7 @@ class SyncManager:
             "running": running,
             "state": state,
             "auto_paused": auto_paused,
+            "auto_sync": bool(self.config.auto_sync),
             "can_pause": running and state == "running",
             "can_stop": running and state == "running",
             "can_resume": (not running) and state in ("paused", "stopped"),
@@ -630,12 +655,21 @@ class SyncManager:
             except Exception:
                 pass
         finally:
+            try:
+                notify.notify_run(
+                    self.config.notify_channels,
+                    self.config.notify_on,
+                    stats or SyncStats(),
+                    self._error,
+                )
+            except Exception:
+                logger.warning("同步结果通知发送失败", exc_info=True)
             with self._lock:
                 self._running = False
                 self._mode = ""
                 if stats is not None and stats.stopped:
                     self._state = "stopped"
-                    self._auto_paused = True
+                    self._auto_paused = False
                 elif stats is not None and stats.paused:
                     self._state = "paused"
                     self._auto_paused = self._pause_run.is_set()
@@ -654,6 +688,12 @@ class SyncManager:
         next_at = time.time() + min(30, max(5, config.interval))
         self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
         while not self._stop.is_set():
+            if not config.auto_sync:
+                with self._lock:
+                    self._next_run_at = None
+                self._wake.wait(30)
+                self._wake.clear()
+                continue
             wait = max(1.0, next_at - time.time())
             if self._wake.wait(wait):
                 self._wake.clear()
@@ -665,7 +705,7 @@ class SyncManager:
             try:
                 with self._lock:
                     auto_paused = self._auto_paused
-                if self.sessions.has_session() and not auto_paused:
+                if config.auto_sync and self.sessions.has_session() and not auto_paused:
                     self.trigger(source="schedule")
             except Exception:
                 logger.warning("定时同步触发失败", exc_info=True)
@@ -805,6 +845,32 @@ class WebApp:
                 )
             if path == "/api/sync/status" and method == "GET":
                 return self._json(start_response, "200 OK", self.sync.status())
+            if path == "/api/problems" and method == "GET":
+                query = parse_qs(str(environ.get("QUERY_STRING") or ""))
+                kind = str((query.get("kind") or ["failed"])[0] or "failed")
+                limit = _as_int((query.get("limit") or ["200"])[0], 200, 1, 500)
+                with StateStore(self.config.db_path) as state:
+                    counts = state.problem_counts()
+                    items = state.problem_files(kind=kind, limit=limit)
+                return self._json(start_response, "200 OK", {"kind": kind, "counts": counts, "items": items})
+            if path == "/api/problems/retry" and method == "POST":
+                body = self._body(environ)
+                kind = str(body.get("kind") or "failed")
+                with StateStore(self.config.db_path) as state:
+                    reset = state.reset_problems(kind=kind)
+                    counts = state.problem_counts()
+                return self._json(start_response, "200 OK", {"ok": True, "reset": reset, "counts": counts})
+            if path == "/api/notify/types" and method == "GET":
+                return self._json(start_response, "200 OK", {"types": self._notify_types()})
+            if path == "/api/notify/test" and method == "POST":
+                body = self._body(environ)
+                raw_channel = body.get("channel") if isinstance(body.get("channel"), dict) else body
+                try:
+                    channel = notify.normalize_channels([raw_channel])[0]
+                    notify.send_test(channel)
+                except Exception as exc:
+                    return self._json(start_response, "400 Bad Request", {"ok": False, "error": str(exc)})
+                return self._json(start_response, "200 OK", {"ok": True})
             if path == "/api/settings" and method == "GET":
                 return self._json(start_response, "200 OK", self._settings_payload())
             if path == "/api/settings" and method == "PUT":
@@ -849,9 +915,11 @@ class WebApp:
             settings = bootstrap_settings(self.config)
         cookies, profile = self.sessions.snapshot()
         stats: dict[str, int] = {}
+        problem_counts: dict[str, int] = {"failed": 0, "permission": 0}
         try:
             with StateStore(self.config.db_path) as state:
                 stats = state.stats()
+                problem_counts = state.problem_counts()
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
         dirs = []
@@ -879,7 +947,8 @@ class WebApp:
                 "total": sum(stats.values()),
                 "uploaded": stats.get("uploaded", 0),
                 "pending": stats.get("pending", 0),
-                "failed": stats.get("failed", 0),
+                "failed": problem_counts.get("failed", 0),
+                "permission": problem_counts.get("permission", 0),
                 "missing": stats.get("missing", 0),
                 "uploading": stats.get("uploading", 0),
                 "skipped": stats.get("skipped_local", 0) + stats.get("skipped_remote", 0),
@@ -931,10 +1000,26 @@ class WebApp:
             "interval": self.config.interval,
             "rate_limit": self.config.rate_limit,
             "exclude_dirs": [str(path) for path in self.config.exclude_dirs],
+            "auto_sync": self.config.auto_sync,
+            "notify_on": self.config.notify_on,
+            "notifications": list(self.config.notify_channels),
             "dry_run": self.config.dry_run,
             "log_level": self.config.log_level,
             "settings_path": str(self.settings.path),
         }
+
+    @staticmethod
+    def _notify_types() -> list[dict[str, Any]]:
+        return [
+            {
+                "type": item,
+                "label": notify.TYPE_LABELS[item],
+                "fields": list(notify.FIELDS[item]),
+                "required": list(notify.REQUIRED[item]),
+                "secret": [name for name in notify.FIELDS[item] if name in notify.SECRET_FIELDS],
+            }
+            for item in notify.ALLOWED_TYPES
+        ]
 
     def _body(self, environ: dict[str, Any]) -> dict[str, Any]:
         try:

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+import wy_music_cloud.notify as notify
 from wy_music_cloud.config import Config
 from wy_music_cloud.session import load_session, save_session
+from wy_music_cloud.state import StateStore
+from wy_music_cloud.syncer import SyncStats
 from wy_music_cloud.web import (
     LoginFlow,
     SessionService,
@@ -198,6 +202,148 @@ def test_login_flow_uses_official_qr_url(tmp_path: Path, monkeypatch: Any) -> No
         assert "music.y.163.com" not in result["qr_url"]
     finally:
         app.login.close()
+
+
+def test_settings_save_notifications_and_auto_sync(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    music = app.config.music_dirs[0]
+    status, _, data = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(music)],
+            "exclude_dirs": [],
+            "interval": 1800,
+            "rate_limit": 1.0,
+            "dry_run": False,
+            "log_level": "INFO",
+            "auto_sync": False,
+            "notify_on": "failure",
+            "notifications": [
+                {"type": "bark", "name": "手机", "config": {"url": "https://api.day.app/abc"}}
+            ],
+        },
+    )
+    assert status == "200 OK"
+    assert data["ok"] is True
+    assert app.config.auto_sync is False
+    assert app.config.notify_on == "failure"
+    assert len(app.config.notify_channels) == 1
+    assert app.config.notify_channels[0]["type"] == "bark"
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["auto_sync"] is False
+    assert saved["notify_on"] == "failure"
+    assert saved["notifications"][0]["config"]["url"] == "https://api.day.app/abc"
+
+
+def test_settings_reject_invalid_notification(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, data = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(app.config.music_dirs[0])],
+            "interval": 3600,
+            "notifications": [{"type": "bark", "config": {}}],
+        },
+    )
+    assert status == "400 Bad Request"
+    assert "缺少必填项" in data["error"]
+
+
+def test_problems_api_lists_and_retries(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        state.mark_seen("denied.mp3", 10, 1)
+        state.mark_failed("denied.mp3", "读取文件失败：没有读取权限")
+        state.mark_seen("boom.mp3", 10, 1)
+        state.mark_failed("boom.mp3", "网络错误")
+
+    status, _, data = call(app, "/api/problems", query="kind=permission")
+    assert status == "200 OK"
+    assert data["counts"] == {"failed": 1, "permission": 1}
+    assert [item["path"] for item in data["items"]] == ["denied.mp3"]
+
+    status, _, data = call(app, "/api/status")
+    assert data["stats"]["failed"] == 1
+    assert data["stats"]["permission"] == 1
+
+    status, _, data = call(app, "/api/problems/retry", method="POST", body={"kind": "failed"})
+    assert status == "200 OK"
+    assert data["reset"] == 1
+    assert data["counts"] == {"failed": 0, "permission": 1}
+
+
+def test_notify_types_and_test_endpoint(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+    status, _, data = call(app, "/api/notify/types")
+    assert status == "200 OK"
+    types = {item["type"]: item for item in data["types"]}
+    assert "telegram" in types
+    assert "url" in types["bark"]["fields"]
+    assert types["bark"]["secret"] == ["url"]
+
+    sent: list[dict[str, Any]] = []
+    monkeypatch.setattr(notify, "send_test", lambda channel: sent.append(channel))
+    status, _, data = call(
+        app,
+        "/api/notify/test",
+        method="POST",
+        body={"channel": {"type": "bark", "config": {"url": "https://api.day.app/abc"}}},
+    )
+    assert status == "200 OK"
+    assert data["ok"] is True
+    assert sent[0]["type"] == "bark"
+
+    status, _, data = call(
+        app,
+        "/api/notify/test",
+        method="POST",
+        body={"type": "bark", "config": {}},
+    )
+    assert status == "400 Bad Request"
+    assert data["ok"] is False
+
+
+def test_stop_current_keeps_auto_sync_enabled(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+    save_session(app.config.session_path, {"MUSIC_U": "token", "__csrf": "csrf"})
+    started = threading.Event()
+    release = threading.Event()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class BlockingSyncer:
+        def __init__(self, *args, **kwargs) -> None:
+            self.stop_event = kwargs["stop_event"]
+
+        def run_once(self):
+            started.set()
+            release.wait(5)
+            stats = SyncStats()
+            stats.stopped = self.stop_event.is_set()
+            return stats
+
+    monkeypatch.setattr("wy_music_cloud.web.CloudClient", FakeClient)
+    monkeypatch.setattr("wy_music_cloud.web.Syncer", BlockingSyncer)
+    assert app.sync.trigger() is True
+    assert started.wait(5) is True
+    assert app.sync.stop_current() is True
+    assert app.sync.status()["state"] == "stopping"
+    assert app.sync._auto_paused is False
+    release.set()
+    app.sync._thread.join(timeout=5)
+    status = app.sync.status()
+    assert status["state"] == "stopped"
+    assert status["auto_paused"] is False
+    assert status["auto_sync"] is True
 
 
 def test_login_flow_saves_cookies(tmp_path: Path) -> None:

@@ -54,3 +54,23 @@ def test_runs(tmp_path: Path) -> None:
         state.finish_run(run_id, scanned=2, uploaded=1, skipped=1, failed=0)
         runs = state.recent_runs()
         assert runs[0]["scanned"] == 2
+
+
+def test_problem_counts_files_and_reset(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        state.mark_seen("ok.mp3", 100, 1)
+        state.mark_failed("ok.mp3", "网络错误")
+        state.mark_seen("denied.mp3", 100, 1)
+        state.mark_failed("denied.mp3", "读取文件失败：没有读取权限")
+
+        assert state.problem_counts() == {"failed": 1, "permission": 1}
+        failed = state.problem_files(kind="failed")
+        assert [item["path"] for item in failed] == ["ok.mp3"]
+        denied = state.problem_files(kind="permission")
+        assert [item["path"] for item in denied] == ["denied.mp3"]
+        assert "没有读取权限" in denied[0]["last_error"]
+        assert {item["path"] for item in state.problem_files(kind="all")} == {"ok.mp3", "denied.mp3"}
+
+        assert state.reset_problems(kind="permission") == 1
+        assert state.problem_counts() == {"failed": 1, "permission": 0}
+        assert state.get("denied.mp3").status == "pending"

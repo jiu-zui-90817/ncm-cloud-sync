@@ -5,10 +5,39 @@
   var state = {
     status: null,
     settingsDirty: false,
+    notifyDirty: false,
     loading: false,
     qrKey: "",
     qrTimer: null,
-    toastTimer: null
+    toastTimer: null,
+    page: "overview",
+    problemKind: "failed",
+    problemCounts: { failed: 0, permission: 0 },
+    notifyTypes: [],
+    notifications: []
+  };
+
+  var FIELD_LABELS = {
+    bot_token: "Bot Token",
+    chat_id: "Chat ID",
+    api_base: "API 地址（可选）",
+    url: "推送地址",
+    group: "分组（可选）",
+    server: "服务器地址",
+    topic: "主题 / Topic",
+    token: "Token",
+    priority: "优先级（可选）",
+    webhook_url: "Webhook 地址",
+    sendkey: "SendKey",
+    user: "User Key",
+    pushkey: "PushKey",
+    host: "SMTP 服务器",
+    port: "端口（可选）",
+    username: "用户名（可选）",
+    password: "密码（可选）",
+    mail_from: "发件人",
+    mail_to: "收件人（逗号分隔）",
+    security: "加密方式（ssl/starttls/none）"
   };
 
   function el(id) {
@@ -81,6 +110,20 @@
     return value + " 秒";
   }
 
+  function formatBytes(value) {
+    var size = Number(value || 0);
+    if (size < 1024) {
+      return size + " B";
+    }
+    if (size < 1024 * 1024) {
+      return (size / 1024).toFixed(1) + " KB";
+    }
+    if (size < 1024 * 1024 * 1024) {
+      return (size / 1024 / 1024).toFixed(1) + " MB";
+    }
+    return (size / 1024 / 1024 / 1024).toFixed(2) + " GB";
+  }
+
   function syncStateLabel(value) {
     var labels = {
       idle: "空闲",
@@ -96,6 +139,17 @@
   function basename(path) {
     var parts = String(path || "").split(/[\\/]/);
     return parts[parts.length - 1] || path;
+  }
+
+  function make(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== undefined && text !== null) {
+      node.textContent = text;
+    }
+    return node;
   }
 
   function renderProgress(items) {
@@ -161,7 +215,9 @@
     el("interval").value = settings.interval || 3600;
     el("rateLimit").value = settings.rate_limit != null ? settings.rate_limit : 1;
     el("dryRun").checked = Boolean(settings.dry_run);
+    el("autoSync").checked = settings.auto_sync !== false;
     el("logLevel").value = settings.log_level || "INFO";
+    el("notifyOn").value = settings.notify_on || "always";
     el("intervalLabel").textContent = formatInterval(settings.interval || status.config.interval);
   }
 
@@ -186,7 +242,11 @@
       }
       el("lastRun").textContent = text;
     }
-    el("nextRun").textContent = sync.next_run_at ? formatDate(sync.next_run_at) : "-";
+    if (sync.auto_sync === false) {
+      el("nextRun").textContent = "自动同步已关闭";
+    } else {
+      el("nextRun").textContent = sync.next_run_at ? formatDate(sync.next_run_at) : "-";
+    }
     var syncState = sync.state || (sync.running ? "running" : "idle");
     el("syncState").textContent = syncStateLabel(syncState);
     el("syncState").className = "tag" + (sync.running ? " active" : "");
@@ -223,25 +283,33 @@
       ? "用户 ID " + data.account.userId
       : "账号信息将在下一次刷新时更新";
     var stats = data.stats || {};
-    var lastStats = (data.sync && data.sync.last_run && data.sync.last_run.stats) || {};
     el("statUploaded").textContent = stats.uploaded || 0;
     el("statPending").textContent = stats.pending || 0;
     el("statFailed").textContent = stats.failed || 0;
-    el("statPermission").textContent = lastStats.permission_denied || 0;
+    el("statPermission").textContent = stats.permission || 0;
     el("statMissing").textContent = stats.missing || 0;
     el("statSkipped").textContent = stats.skipped || 0;
-    if (data.sync.running) {
+    if (!data.sync.auto_sync) {
+      el("syncHint").textContent = "自动同步已关闭，仍可手动开始同步。";
+    } else if (data.sync.running) {
       el("syncHint").textContent = "正在同步，请保持应用运行。";
     } else if (data.sync.state === "paused") {
       el("syncHint").textContent = "同步已暂停，点击继续会重新开始一轮。";
     } else if (data.sync.state === "stopped") {
-      el("syncHint").textContent = "同步已终止，点击继续会重新开始一轮。";
+      el("syncHint").textContent = "已终止本次同步，自动同步仍会按计划运行。";
     } else {
       el("syncHint").textContent = "同步任务在后台运行，可随时关闭页面。";
     }
     renderLastRun(data.sync || {});
     renderSettings(data);
+    if (!state.notifyDirty) {
+      state.notifications = JSON.parse(JSON.stringify((data.settings && data.settings.notifications) || []));
+      renderNotifications();
+    }
     renderWarnings(data.music_dirs || []);
+    if (state.page === "problems") {
+      loadProblems(state.problemKind, true);
+    }
   }
 
   function loadStatus(silent) {
@@ -260,6 +328,94 @@
     });
   }
 
+  function showPage(name) {
+    state.page = name;
+    Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (item) {
+      item.classList.toggle("active", item.getAttribute("data-page") === name);
+    });
+    ["overview", "problems", "settings", "notifications", "logs"].forEach(function (page) {
+      var node = el("page-" + page);
+      if (node) {
+        node.classList.toggle("hidden", page !== name);
+      }
+    });
+    if (name === "problems") {
+      loadProblems(state.problemKind, false);
+    } else if (name === "logs") {
+      loadLogs();
+    } else if (name === "notifications") {
+      renderNotifications();
+    }
+  }
+
+  function updateProblemSwitches() {
+    Array.prototype.forEach.call(document.querySelectorAll(".problem-switch .chip"), function (item) {
+      item.classList.toggle("active", item.getAttribute("data-problem-kind") === state.problemKind);
+    });
+  }
+
+  function renderProblems(data) {
+    state.problemCounts = data.counts || { failed: 0, permission: 0 };
+    el("problemFailedCount").textContent = state.problemCounts.failed || 0;
+    el("problemPermissionCount").textContent = state.problemCounts.permission || 0;
+    var list = el("problemList");
+    list.textContent = "";
+    var items = data.items || [];
+    el("problemEmpty").classList.toggle("hidden", items.length > 0);
+    items.forEach(function (item) {
+      var row = make("div", "problem-row");
+      var head = make("div", "problem-head");
+      head.appendChild(make("span", "problem-path", item.path));
+      var copy = make("button", "btn tiny ghost", "复制路径");
+      copy.type = "button";
+      copy.addEventListener("click", function () {
+        copyText(item.path).then(function () {
+          showToast("路径已复制");
+        }).catch(function (error) {
+          showToast(error.message, true);
+        });
+      });
+      head.appendChild(copy);
+      row.appendChild(head);
+      var meta = make("div", "problem-meta");
+      meta.appendChild(make("span", "", "最后更新 " + formatDate(item.updated_at)));
+      meta.appendChild(make("span", "", "大小 " + formatBytes(item.size)));
+      meta.appendChild(make("span", "", "尝试 " + (item.attempts || 0) + " 次"));
+      row.appendChild(meta);
+      if (item.last_error) {
+        row.appendChild(make("p", "problem-error", item.last_error));
+      }
+      list.appendChild(row);
+    });
+  }
+
+  function loadProblems(kind, silent) {
+    if (kind) {
+      state.problemKind = kind;
+    }
+    updateProblemSwitches();
+    return api("/api/problems?kind=" + encodeURIComponent(state.problemKind) + "&limit=200").then(function (data) {
+      renderProblems(data);
+    }).catch(function (error) {
+      if (!silent) {
+        showToast(error.message, true);
+      }
+      el("problemStatus").textContent = error.message;
+    });
+  }
+
+  function retryProblems() {
+    api("/api/problems/retry", { method: "POST", body: { kind: state.problemKind } }).then(function (data) {
+      el("problemStatus").textContent = "已重置 " + (data.reset || 0) + " 个文件，下次同步会重新尝试。";
+      showToast("已重置 " + (data.reset || 0) + " 个文件");
+      loadProblems(state.problemKind, false);
+      loadStatus(true);
+    }).catch(function (error) {
+      el("problemStatus").textContent = error.message;
+      showToast(error.message, true);
+    });
+  }
+
   function loadLogs() {
     api("/api/logs?lines=200").then(function (data) {
       var view = el("logView");
@@ -269,6 +425,174 @@
     }).catch(function (error) {
       el("logView").textContent = error.message;
     });
+  }
+
+  function notifyMeta(type) {
+    for (var index = 0; index < state.notifyTypes.length; index += 1) {
+      if (state.notifyTypes[index].type === type) {
+        return state.notifyTypes[index];
+      }
+    }
+    return { type: type, label: type, fields: [], required: [], secret: [] };
+  }
+
+  function loadNotifyTypes() {
+    return api("/api/notify/types").then(function (data) {
+      state.notifyTypes = data.types || [];
+      var select = el("notifyType");
+      select.textContent = "";
+      state.notifyTypes.forEach(function (item) {
+        var option = document.createElement("option");
+        option.value = item.type;
+        option.textContent = item.label;
+        select.appendChild(option);
+      });
+      renderNotifications();
+    }).catch(function (error) {
+      showToast(error.message, true);
+    });
+  }
+
+  function renderNotifications() {
+    var list = el("notifyList");
+    if (!list) {
+      return;
+    }
+    list.textContent = "";
+    if (!state.notifications.length) {
+      list.appendChild(make("div", "empty-state", "还没有通知渠道。选择上面的类型后点“添加”。"));
+      return;
+    }
+    state.notifications.forEach(function (channel, index) {
+      var meta = notifyMeta(channel.type);
+      var card = make("div", "notify-card");
+      card.setAttribute("data-index", String(index));
+      var head = make("div", "notify-head");
+      var title = make("div", "notify-title");
+      title.appendChild(make("strong", "", meta.label || channel.type));
+      var nameInput = document.createElement("input");
+      nameInput.className = "notify-name";
+      nameInput.type = "text";
+      nameInput.placeholder = "备注名（可选）";
+      nameInput.value = channel.name || "";
+      nameInput.setAttribute("data-field", "__name");
+      title.appendChild(nameInput);
+      head.appendChild(title);
+      var actions = make("div", "notify-actions");
+      var enabledLabel = make("label", "check-field compact");
+      var enabled = document.createElement("input");
+      enabled.type = "checkbox";
+      enabled.checked = channel.enabled !== false;
+      enabled.setAttribute("data-field", "__enabled");
+      enabledLabel.appendChild(enabled);
+      enabledLabel.appendChild(make("span", "", "启用"));
+      actions.appendChild(enabledLabel);
+      var test = make("button", "btn tiny ghost", "测试");
+      test.type = "button";
+      test.setAttribute("data-action", "test");
+      actions.appendChild(test);
+      var remove = make("button", "btn tiny danger-ghost", "删除");
+      remove.type = "button";
+      remove.setAttribute("data-action", "delete");
+      actions.appendChild(remove);
+      head.appendChild(actions);
+      card.appendChild(head);
+
+      var grid = make("div", "notify-grid");
+      (meta.fields || []).forEach(function (field) {
+        var label = make("label", "field");
+        var required = (meta.required || []).indexOf(field) >= 0;
+        label.appendChild(make("span", "", (FIELD_LABELS[field] || field) + (required ? " *" : "")));
+        var input = document.createElement("input");
+        input.type = (meta.secret || []).indexOf(field) >= 0 ? "password" : "text";
+        input.value = (channel.config && channel.config[field]) || "";
+        input.setAttribute("data-field", field);
+        input.autocomplete = "off";
+        label.appendChild(input);
+        grid.appendChild(label);
+      });
+      card.appendChild(grid);
+      list.appendChild(card);
+    });
+  }
+
+  function onNotifyInput(event) {
+    var target = event.target;
+    var card = target.closest ? target.closest(".notify-card") : null;
+    if (!card) {
+      return;
+    }
+    var index = Number(card.getAttribute("data-index"));
+    var channel = state.notifications[index];
+    if (!channel) {
+      return;
+    }
+    var field = target.getAttribute("data-field");
+    if (field === "__enabled") {
+      channel.enabled = Boolean(target.checked);
+    } else if (field === "__name") {
+      channel.name = target.value;
+    } else if (field) {
+      channel.config = channel.config || {};
+      channel.config[field] = target.value;
+    }
+    state.notifyDirty = true;
+    el("notifyStatus").textContent = "有未保存的修改";
+  }
+
+  function onNotifyClick(event) {
+    var target = event.target;
+    var action = target.getAttribute ? target.getAttribute("data-action") : "";
+    if (!action) {
+      return;
+    }
+    var card = target.closest ? target.closest(".notify-card") : null;
+    if (!card) {
+      return;
+    }
+    var index = Number(card.getAttribute("data-index"));
+    var channel = state.notifications[index];
+    if (!channel) {
+      return;
+    }
+    if (action === "delete") {
+      state.notifications.splice(index, 1);
+      state.notifyDirty = true;
+      renderNotifications();
+      el("notifyStatus").textContent = "已删除，保存后生效";
+      return;
+    }
+    if (action === "test") {
+      target.disabled = true;
+      el("notifyStatus").textContent = "正在发送测试通知…";
+      api("/api/notify/test", { method: "POST", body: { channel: channel } }).then(function () {
+        el("notifyStatus").textContent = "测试通知已发送";
+        showToast("测试通知已发送");
+      }).catch(function (error) {
+        el("notifyStatus").textContent = error.message;
+        showToast(error.message, true);
+      }).finally(function () {
+        target.disabled = false;
+      });
+    }
+  }
+
+  function addNotifyChannel() {
+    var type = el("notifyType").value;
+    if (!type) {
+      return;
+    }
+    var meta = notifyMeta(type);
+    state.notifications.push({
+      id: "",
+      type: type,
+      name: meta.label || type,
+      enabled: true,
+      config: {}
+    });
+    state.notifyDirty = true;
+    renderNotifications();
+    el("notifyStatus").textContent = "已添加，填写参数后保存";
   }
 
   function stopQrPolling() {
@@ -452,10 +776,10 @@
   }
 
   function stopSync() {
-    if (!window.confirm("终止本次同步？当前文件会处理完，未处理的文件下一轮继续。")) {
+    if (!window.confirm("终止本次同步？当前文件会处理完，自动同步不会关闭。")) {
       return;
     }
-    syncAction("/api/sync/stop", "正在终止同步");
+    syncAction("/api/sync/stop", "正在终止本次同步");
   }
 
   function resumeSync() {
@@ -463,7 +787,9 @@
   }
 
   function saveSettings(event) {
-    event.preventDefault();
+    if (event) {
+      event.preventDefault();
+    }
     var dirs = el("musicDirs").value.split(/\r?\n/).map(function (line) {
       return line.trim();
     }).filter(Boolean);
@@ -476,17 +802,27 @@
       interval: Number(el("interval").value),
       rate_limit: Number(el("rateLimit").value),
       dry_run: el("dryRun").checked,
-      log_level: el("logLevel").value
+      auto_sync: el("autoSync").checked,
+      log_level: el("logLevel").value,
+      notify_on: el("notifyOn").value,
+      notifications: state.notifications
     };
     api("/api/settings", { method: "PUT", body: payload }).then(function () {
       state.settingsDirty = false;
+      state.notifyDirty = false;
       el("settingsStatus").textContent = "已保存";
+      el("notifyStatus").textContent = "已保存";
       showToast("设置已保存");
       loadStatus(false);
     }).catch(function (error) {
       el("settingsStatus").textContent = error.message;
+      el("notifyStatus").textContent = error.message;
       showToast(error.message, true);
     });
+  }
+
+  function saveNotifications() {
+    saveSettings();
   }
 
   function logout() {
@@ -507,6 +843,20 @@
       loadStatus(false);
     }).catch(function (error) {
       showToast(error.message, true);
+    });
+  }
+
+  function bindProblemEntry(node) {
+    node.addEventListener("click", function () {
+      state.problemKind = node.getAttribute("data-problem-kind") || "failed";
+      updateProblemSwitches();
+      showPage("problems");
+    });
+    node.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        node.click();
+      }
     });
   }
 
@@ -537,6 +887,26 @@
       state.settingsDirty = true;
       el("settingsStatus").textContent = "有未保存的修改";
     });
+    el("saveNotifications").addEventListener("click", saveNotifications);
+    el("addNotifyChannel").addEventListener("click", addNotifyChannel);
+    el("notifyList").addEventListener("input", onNotifyInput);
+    el("notifyList").addEventListener("change", onNotifyInput);
+    el("notifyList").addEventListener("click", onNotifyClick);
+    el("notifyOn").addEventListener("change", function () {
+      state.notifyDirty = true;
+      el("notifyStatus").textContent = "有未保存的修改";
+    });
+    el("refreshProblems").addEventListener("click", function () { loadProblems(state.problemKind, false); });
+    el("retryProblems").addEventListener("click", retryProblems);
+    Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (item) {
+      item.addEventListener("click", function () { showPage(item.getAttribute("data-page")); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".problem-switch .chip"), function (item) {
+      item.addEventListener("click", function () { loadProblems(item.getAttribute("data-problem-kind"), false); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".stat.clickable"), function (item) {
+      bindProblemEntry(item);
+    });
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden) {
         loadStatus(true);
@@ -551,6 +921,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     bind();
+    loadNotifyTypes();
     loadStatus(false);
     loadLogs();
   });

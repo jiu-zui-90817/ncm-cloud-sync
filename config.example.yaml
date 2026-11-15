@@ -67,6 +67,28 @@ min_size: 0
 # 大于该字节数的文件标记失败；0 表示不限制。
 max_upload_size: 0
 
+# 自动同步开关。false 时只运行手动同步，后台调度不会自动触发。
+auto_sync: true
+
+# 同步结果通知时机：always / failure / success / never。
+notify_on: always
+
+# 通知渠道。enabled=false 可先保存配置但不发送。
+# 支持 telegram / bark / ntfy / gotify / discord / slack / serverchan /
+# pushplus / pushover / pushdeer / webhook / smtp。
+notify_channels: []
+#  - type: bark
+#    name: 手机
+#    enabled: true
+#    config:
+#      url: https://api.day.app/你的key
+#  - type: telegram
+#    name: Telegram
+#    enabled: true
+#    config:
+#      bot_token: 123456:ABC
+#      chat_id: "123456789"
+
 # 全局试跑。命令行 --dry-run 也会打开。
 dry_run: false
 

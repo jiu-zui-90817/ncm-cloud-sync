@@ -138,6 +138,54 @@ class StateStore:
         ).fetchall()
         return {row["status"]: row["n"] for row in rows}
 
+    def problem_counts(self) -> dict[str, int]:
+        permission = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM files WHERE status = 'failed' "
+            "AND last_error LIKE '%没有读取权限%'"
+        ).fetchone()["n"]
+        failed = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM files WHERE status = 'failed' "
+            "AND (last_error IS NULL OR last_error NOT LIKE '%没有读取权限%')"
+        ).fetchone()["n"]
+        return {"failed": int(failed or 0), "permission": int(permission or 0)}
+
+    def problem_files(self, kind: str = "failed", limit: int = 200) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 500))
+        if kind == "permission":
+            where = "status = 'failed' AND last_error LIKE '%没有读取权限%'"
+        elif kind == "failed":
+            where = (
+                "status = 'failed' AND (last_error IS NULL OR last_error NOT LIKE '%没有读取权限%')"
+            )
+        elif kind == "all":
+            where = "status = 'failed'"
+        else:
+            raise StateError(f"未知的问题类型: {kind}")
+        rows = self.conn.execute(
+            "SELECT path, size, attempts, last_error, updated_at FROM files "
+            f"WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def reset_problems(self, kind: str = "failed") -> int:
+        if kind == "permission":
+            where = "status = 'failed' AND last_error LIKE '%没有读取权限%'"
+        elif kind == "failed":
+            where = (
+                "status = 'failed' AND (last_error IS NULL OR last_error NOT LIKE '%没有读取权限%')"
+            )
+        elif kind == "all":
+            where = "status = 'failed'"
+        else:
+            raise StateError(f"未知的问题类型: {kind}")
+        cursor = self.conn.execute(
+            f"UPDATE files SET status = 'pending', last_error = NULL, updated_at = ? WHERE {where}",
+            (utc_now(),),
+        )
+        self.conn.commit()
+        return int(cursor.rowcount)
+
     def recent_runs(self, limit: int = 10) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)

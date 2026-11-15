@@ -68,121 +68,195 @@
     </section>
 
     <div id="dashboard" class="dashboard hidden">
-      <section class="card account-card">
-        <div>
-          <p class="eyebrow">当前账号</p>
-          <h2 id="nickname">-</h2>
-          <p class="muted" id="userId">-</p>
-        </div>
-        <div class="account-actions">
-          <button id="refreshAccount" class="btn ghost" type="button">刷新账号</button>
-          <button id="logoutButton" class="btn danger-ghost" type="button">退出登录</button>
-        </div>
-      </section>
+      <nav class="nav" aria-label="功能分区">
+        <button class="nav-item active" type="button" data-page="overview">概览</button>
+        <button class="nav-item" type="button" data-page="problems">文件问题</button>
+        <button class="nav-item" type="button" data-page="settings">设置</button>
+        <button class="nav-item" type="button" data-page="notifications">通知</button>
+        <button class="nav-item" type="button" data-page="logs">日志与诊断</button>
+      </nav>
 
-      <section class="stats-grid">
-        <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
-        <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong></article>
-        <article class="stat"><span class="stat-label">失败</span><strong id="statFailed">0</strong></article>
-        <article class="stat"><span class="stat-label">无权限</span><strong id="statPermission">0</strong></article>
-        <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
-        <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
+      <div id="page-overview" class="page">
+        <section class="card account-card">
           <div>
-            <h2>同步控制</h2>
-            <p class="muted" id="syncHint">同步任务在后台运行，可随时关闭页面。</p>
+            <p class="eyebrow">当前账号</p>
+            <h2 id="nickname">-</h2>
+            <p class="muted" id="userId">-</p>
           </div>
-          <span id="syncState" class="tag">空闲</span>
-        </div>
-        <div class="actions">
-          <button id="syncButton" class="btn primary" type="button">立即同步</button>
-          <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
-          <button id="pauseButton" class="btn ghost" type="button" disabled>暂停</button>
-          <button id="stopButton" class="btn ghost" type="button" disabled>终止</button>
-          <button id="resumeButton" class="btn ghost" type="button" disabled>继续</button>
-          <button id="refreshButton" class="btn ghost" type="button">刷新状态</button>
-          <button id="copyDiagnosticsDashboard" class="btn ghost" type="button">复制诊断</button>
-        </div>
-        <label class="check-field">
-          <input id="forceRecheck" type="checkbox">
-          <span>强制重新检查（忽略本地已同步记录，修云端已有但实际为空）</span>
-        </label>
-        <div class="sync-meta">
-          <div><span class="meta-label">上次运行</span><span id="lastRun">-</span></div>
-          <div><span class="meta-label">下次计划</span><span id="nextRun">-</span></div>
-          <div><span class="meta-label">同步间隔</span><span id="intervalLabel">-</span></div>
-        </div>
-        <div id="progressBox" class="progress-box hidden">
-          <div class="progress-head"><span>正在处理</span><span id="progressCount"></span></div>
-          <ul id="progressList" class="progress-list"></ul>
-        </div>
-        <p id="syncError" class="error-line hidden"></p>
-      </section>
+          <div class="account-actions">
+            <button id="refreshAccount" class="btn ghost" type="button">刷新账号</button>
+            <button id="logoutButton" class="btn danger-ghost" type="button">退出登录</button>
+          </div>
+        </section>
 
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>音乐目录与设置</h2>
-            <p class="muted">每行一个绝对路径。保存后下一轮同步生效。</p>
+        <section class="stats-grid">
+          <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
+          <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong></article>
+          <article class="stat clickable" data-problem-kind="failed" tabindex="0" role="button" title="查看失败文件"><span class="stat-label">失败</span><strong id="statFailed">0</strong><small class="stat-link">查看明细</small></article>
+          <article class="stat clickable" data-problem-kind="permission" tabindex="0" role="button" title="查看无权限文件"><span class="stat-label">无权限</span><strong id="statPermission">0</strong><small class="stat-link">查看明细</small></article>
+          <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
+          <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>同步控制</h2>
+              <p class="muted" id="syncHint">同步任务在后台运行，可随时关闭页面。</p>
+            </div>
+            <span id="syncState" class="tag">空闲</span>
           </div>
-        </div>
-        <form id="settingsForm" class="settings-form">
-          <label class="field wide">
-            <span>音乐目录</span>
-            <textarea id="musicDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music"></textarea>
-          </label>
-          <label class="field wide">
-            <span>排除目录</span>
-            <textarea id="excludeDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music/有声书"></textarea>
-            <small class="muted">每行一个绝对路径，必须位于音乐目录内；整棵目录跳过。</small>
-          </label>
-          <label class="field">
-            <span>同步间隔（秒）</span>
-            <input id="interval" type="number" min="60" max="86400" step="60" value="3600">
-          </label>
-          <label class="field">
-            <span>请求间隔（秒）</span>
-            <input id="rateLimit" type="number" min="0" max="10" step="0.1" value="1">
-          </label>
-          <label class="field">
-            <span>日志级别</span>
-            <select id="logLevel">
-              <option value="DEBUG">DEBUG</option>
-              <option value="INFO">INFO</option>
-              <option value="WARNING">WARNING</option>
-              <option value="ERROR">ERROR</option>
-            </select>
-          </label>
+          <div class="actions">
+            <button id="syncButton" class="btn primary" type="button">立即同步</button>
+            <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
+            <button id="pauseButton" class="btn ghost" type="button" disabled>暂停</button>
+            <button id="stopButton" class="btn ghost" type="button" disabled>终止</button>
+            <button id="resumeButton" class="btn ghost" type="button" disabled>继续</button>
+            <button id="refreshButton" class="btn ghost" type="button">刷新状态</button>
+            <button id="copyDiagnosticsDashboard" class="btn ghost" type="button">复制诊断</button>
+          </div>
           <label class="check-field">
-            <input id="dryRun" type="checkbox">
-            <span>默认只演练，不真正上传</span>
+            <input id="forceRecheck" type="checkbox">
+            <span>强制重新检查（忽略本地已同步记录，修云端已有但实际为空）</span>
           </label>
-          <div class="form-actions">
-            <button id="saveSettings" class="btn primary" type="submit">保存设置</button>
-            <span id="settingsStatus" class="status-line"></span>
+          <div class="sync-meta">
+            <div><span class="meta-label">上次运行</span><span id="lastRun">-</span></div>
+            <div><span class="meta-label">下次计划</span><span id="nextRun">-</span></div>
+            <div><span class="meta-label">同步间隔</span><span id="intervalLabel">-</span></div>
           </div>
-        </form>
-        <div id="dirWarnings" class="dir-warnings"></div>
-      </section>
+          <div id="progressBox" class="progress-box hidden">
+            <div class="progress-head"><span>正在处理</span><span id="progressCount"></span></div>
+            <ul id="progressList" class="progress-list"></ul>
+          </div>
+          <p id="syncError" class="error-line hidden"></p>
+        </section>
+      </div>
 
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>运行日志</h2>
-            <p class="muted">最近 200 行，保存在本机数据目录。</p>
+      <div id="page-problems" class="page hidden">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>文件问题</h2>
+              <p class="muted">失败和无权限文件会保留在这里，修复权限或网络后可以重试。</p>
+            </div>
+            <div class="actions">
+              <button id="refreshProblems" class="btn ghost" type="button">刷新</button>
+              <button id="retryProblems" class="btn ghost" type="button">重试当前分类</button>
+            </div>
           </div>
-          <div class="log-actions">
-            <button id="diagnosticsButton" class="btn ghost" type="button">诊断信息</button>
-            <button id="logCopyDiagnostics" class="btn ghost" type="button">复制诊断</button>
-            <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
+          <div class="problem-switch">
+            <button class="chip active" type="button" data-problem-kind="failed">失败 <span id="problemFailedCount">0</span></button>
+            <button class="chip" type="button" data-problem-kind="permission">无权限 <span id="problemPermissionCount">0</span></button>
           </div>
-        </div>
-        <pre id="logView" class="log-view">加载中…</pre>
-        <pre id="diagnosticsView" class="log-view hidden"></pre>
-      </section>
+          <div id="problemEmpty" class="empty-state hidden">当前分类没有文件。</div>
+          <div id="problemList" class="problem-list"></div>
+          <p id="problemStatus" class="status-line"></p>
+        </section>
+      </div>
+
+      <div id="page-settings" class="page hidden">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>音乐目录与同步设置</h2>
+              <p class="muted">每行一个绝对路径。保存后下一轮同步生效。</p>
+            </div>
+          </div>
+          <form id="settingsForm" class="settings-form">
+            <label class="field wide">
+              <span>音乐目录</span>
+              <textarea id="musicDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music"></textarea>
+            </label>
+            <label class="field wide">
+              <span>排除目录</span>
+              <textarea id="excludeDirs" rows="3" spellcheck="false" placeholder="/vol1/1000/Music/有声书"></textarea>
+              <small class="muted">每行一个绝对路径，必须位于音乐目录内；整棵目录跳过。</small>
+            </label>
+            <label class="field">
+              <span>同步间隔（秒）</span>
+              <input id="interval" type="number" min="60" max="86400" step="60" value="3600">
+            </label>
+            <label class="field">
+              <span>请求间隔（秒）</span>
+              <input id="rateLimit" type="number" min="0" max="10" step="0.1" value="1">
+            </label>
+            <label class="field">
+              <span>日志级别</span>
+              <select id="logLevel">
+                <option value="DEBUG">DEBUG</option>
+                <option value="INFO">INFO</option>
+                <option value="WARNING">WARNING</option>
+                <option value="ERROR">ERROR</option>
+              </select>
+            </label>
+            <label class="check-field wide">
+              <input id="autoSync" type="checkbox" checked>
+              <span>启用自动同步（关闭后只手动同步，定时任务不再自动启动）</span>
+            </label>
+            <label class="check-field">
+              <input id="dryRun" type="checkbox">
+              <span>默认只演练，不真正上传</span>
+            </label>
+            <div class="form-actions">
+              <button id="saveSettings" class="btn primary" type="submit">保存设置</button>
+              <span id="settingsStatus" class="status-line"></span>
+            </div>
+          </form>
+          <div id="dirWarnings" class="dir-warnings"></div>
+        </section>
+      </div>
+
+      <div id="page-notifications" class="page hidden">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>推送通知</h2>
+              <p class="muted">同步结束、失败或暂停时推送到手机或聊天工具。通知失败不会影响同步。</p>
+            </div>
+          </div>
+          <div class="notify-toolbar">
+            <label class="field">
+              <span>通知时机</span>
+              <select id="notifyOn">
+                <option value="always">每次都通知</option>
+                <option value="failure">仅失败或暂停</option>
+                <option value="success">仅成功</option>
+                <option value="never">关闭通知</option>
+              </select>
+            </label>
+            <div class="notify-add">
+              <label class="field">
+                <span>添加渠道</span>
+                <select id="notifyType"></select>
+              </label>
+              <button id="addNotifyChannel" class="btn ghost" type="button">添加</button>
+            </div>
+          </div>
+          <div id="notifyList" class="notify-list"></div>
+          <div class="form-actions">
+            <button id="saveNotifications" class="btn primary" type="button">保存通知设置</button>
+            <span id="notifyStatus" class="status-line"></span>
+          </div>
+        </section>
+      </div>
+
+      <div id="page-logs" class="page hidden">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>运行日志</h2>
+              <p class="muted">最近 200 行，保存在本机数据目录。</p>
+            </div>
+            <div class="log-actions">
+              <button id="diagnosticsButton" class="btn ghost" type="button">诊断信息</button>
+              <button id="logCopyDiagnostics" class="btn ghost" type="button">复制诊断</button>
+              <button id="refreshLogs" class="btn ghost" type="button">刷新日志</button>
+            </div>
+          </div>
+          <pre id="logView" class="log-view">加载中…</pre>
+          <pre id="diagnosticsView" class="log-view hidden"></pre>
+        </section>
+      </div>
     </div>
   </main>
 
