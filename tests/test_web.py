@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import io
 import json
+import runpy
+import sys
 import threading
 import time
+import types
+import warnings
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -693,6 +697,34 @@ def test_run_detail_api(tmp_path: Path) -> None:
     assert status == "404 Not Found"
     status, _, data = call(app, "/api/runs/abc")
     assert status == "400 Bad Request"
+
+
+def test_web_module_entrypoint(tmp_path: Path, monkeypatch: Any) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    monkeypatch.setenv("NCM_CLOUD_SYNC_DIRS", str(music))
+    monkeypatch.setenv("NCM_CLOUD_SYNC_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NCM_CLOUD_SYNC_SETTINGS", str(tmp_path / "settings.json"))
+    monkeypatch.setenv("NCM_CLOUD_SYNC_LOG_FILE", str(tmp_path / "app.log"))
+    monkeypatch.setenv("NCM_CLOUD_SYNC_SOCKET", "")
+    monkeypatch.setenv("NCM_CLOUD_SYNC_DEV", "1")
+
+    fake_waitress = types.ModuleType("waitress")
+
+    def fake_serve(*_args: Any, **_kwargs: Any) -> None:
+        raise KeyboardInterrupt
+
+    fake_waitress.serve = fake_serve
+    monkeypatch.setitem(sys.modules, "waitress", fake_waitress)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            runpy.run_module("ncm_cloud_sync.web", run_name="__main__")
+        except SystemExit as exc:
+            assert exc.code == 0
+        else:
+            raise AssertionError("ncm_cloud_sync.web 没有执行 __main__ 入口")
 
 
 def test_static_page_has_cookie_login(tmp_path: Path) -> None:

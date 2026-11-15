@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.8 修复 0.3.7 的启动回归：`web.py` 丢失 `if __name__ == "__main__": raise SystemExit(main())`，`python -m ncm_cloud_sync.web` 只导入模块后退出 0，应用中心报“Web 服务启动失败”；已恢复入口并新增 `tests/test_web.py::test_web_module_entrypoint` 回归测试。
 - 0.3.7 起新增 `GET /api/permissions/check`：只读检查当前 `music_dirs` 中配置扩展名的音频文件，返回 `ok/user/files/dirs/unreadable_files/unreadable_dirs/samples/directories/truncated/limit/commands/notes`；`directories[]` 含 `path/exists/readable/files/dirs/unreadable_files/unreadable_dirs/truncated`；`commands` 为去重后的 `setfacl` 修复命令，不会执行。单次最多 200000 个文件、30 秒，超限时 `truncated=true`。
 - 0.3.7 起 `/api/status` 新增 `pending_scan`：最近一条运行记录为 `mode=scan` 时返回 `{run_id,finished_at,to_upload,incomplete}`，否则为 `null`；Web 概览「待处理」优先显示该 `to_upload`，不写 `files` 表。
 - 0.3.6 修复 `CloudClient.preflight()`：`cloud_song_md5_map()` 的 value 是 songId（int），旧代码按 dict 调 `info.get("size")` 会抛 `'int' object has no attribute 'get'`，导致每轮同步在预检阶段中止。现在兼容 `md5 -> songId` 与 `md5 -> 元数据 dict` 两种映射。
