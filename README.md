@@ -60,7 +60,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.14.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.15.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -148,7 +148,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.14** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.15** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -164,11 +164,11 @@ var/
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.14，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.15，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.13 及更早版本用 weapi 提交云盘信息（`/weapi/upload/cloud/info/v2`），2026-11 起该写入接口已失效，无论参数怎么调都返回 [400] 接口调用失败。0.2.14 改为网易云手机客户端的 eapi：`POST https://interface.music.163.com/eapi/upload/cloud/info/v2`，请求体附带 `header` 与 `e_r=false` 后用 AES-128-ECB 加密，Cookie 里带 `MUSIC_U`。提交字段保持：`resourceId` 用同一个 NOS token 的字符串值、`songid` 用 check 返回值的字符串（0 就提交 `"0"`）、`filename` 用真实文件名（含扩展名）、`song` 用标题，不发 `objectKey`；发布接口 `pub/v2` 同样改走 eapi。升级到 0.2.14，停止再启动应用后重试。若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid 和 resourceId，请连同诊断信息反馈。
+0.2.13 及更早版本用 weapi 提交云盘信息（`/weapi/upload/cloud/info/v2`），2026-11 起该写入接口已失效，无论参数怎么调都返回 [400] 接口调用失败。0.2.14 改用 eapi，但用的是手机域名 `interface.music.163.com`、appver 3.1.17.204416，且 eapi header 里没带 `NMTID`，info/v2 仍然 400。0.2.15 按当前可用的 SPlayer-Next 实现改为：`POST https://interfacepc.music.163.com/eapi/upload/cloud/info/v2`，PC appver `3.1.29.205117`，把 `NMTID` 同时放进请求体 header 和 Cookie，`resourceId` 与 `songid` 用 JSON 数字提交；`filename` 用真实文件名（含扩展名），`song` 用标题，不发 `objectKey`；发布接口 `pub/v2` 同样走这套 eapi。升级到 0.2.15，停止再启动应用后重试。若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 NMTID，请连同诊断信息反馈。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 

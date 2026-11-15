@@ -61,9 +61,11 @@ EAPI_PC_USER_AGENT = (
     "(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 "
     "NeteaseMusicDesktop/3.1.29.205117"
 )
-# 云盘写入接口的当前可用形态：interface eapi + iPhone 客户端头。
-# 只把 info/v2 和 pub/v2 走 weapi 会返回 [400] 接口调用失败。
-EAPI_URL = "https://interface.music.163.com"
+# 云盘写入接口的当前可用形态（SPlayer-Next）：
+# interfacepc eapi + PC 客户端 appver + eapi header 里带 NMTID。
+# 0.2.14 用 interface.music.163.com + appver 3.1.17 + 不带 NMTID，
+# info/v2 仍然返回 [400] 接口调用失败。
+EAPI_CLOUD_APPVER = "3.1.29.205117"
 EAPI_IPHONE_USER_AGENT = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)"
 
 
@@ -342,12 +344,12 @@ class CloudClient:
         *,
         check: bool = True,
     ) -> dict[str, Any]:
-        """用手机客户端 eapi 调用云盘写入接口。
+        """用 PC 客户端 eapi 调用云盘写入接口。
 
         2026-11 起 /api/upload/cloud/info/v2 与 /api/cloud/pub/v2 走
-        weapi 会返回 [400] 接口调用失败；当前可用实现（ncm-api-rs）使用
-        interface.music.163.com 的 eapi，并在请求体 header 与 Cookie 中
-        带上登录态和设备信息。
+        weapi 会返回 [400] 接口调用失败；当前可用的 SPlayer-Next 使用
+        interfacepc.music.163.com 的 eapi，PC appver 3.1.29.205117，
+        并在 header 与 Cookie 中带上 NMTID。
         """
         device_id = self._ensure_anonymous_device()
         now_ms = int(time.time() * 1000)
@@ -355,7 +357,7 @@ class CloudClient:
             "osver": str(self.cookies.get("osver") or ANON_OSVER),
             "deviceId": device_id,
             "os": str(self.cookies.get("os") or "pc"),
-            "appver": str(self.cookies.get("appver") or ANON_APPVER),
+            "appver": EAPI_CLOUD_APPVER,
             "versioncode": str(self.cookies.get("versioncode") or "140"),
             "mobilename": str(self.cookies.get("mobilename") or ""),
             "buildver": str(self.cookies.get("buildver") or int(now_ms / 1000)),
@@ -368,6 +370,11 @@ class CloudClient:
             value = self.cookies.get(name)
             if value:
                 header[name] = str(value)
+        # eapi 的 NMTID 与 MUSIC_U 一样要同时出现在请求体 header 和
+        # Cookie 里；0.2.14 漏了它，服务端仍会回 400。
+        nmtid = self.cookies.get("NMTID")
+        if nmtid:
+            header["NMTID"] = str(nmtid)
         body = dict(payload)
         body["e_r"] = False
         body["header"] = header
@@ -378,7 +385,7 @@ class CloudClient:
         )
         lines: list[str] = []
         result = self._post_json(
-            EAPI_URL + "/eapi/" + uri[len("/api/"):],
+            EAPI_PC_URL + "/eapi/" + uri[len("/api/"):],
             form,
             headers={
                 "User-Agent": EAPI_IPHONE_USER_AGENT,
@@ -674,23 +681,26 @@ class CloudClient:
             "album": album,
             "artist": artist,
             "bitrate": bitrate,
-            # eapi 客户端（ncm-api-rs）把 resourceId 作为字符串提交；
-            # 0.2.12/0.2.13 的 weapi info/v2 无论整数还是字符串都返回 400。
-            "resourceId": str(resource_id),
+            # SPlayer-Next 把 resourceId 作为 JSON 数字提交；0.2.14 转成
+            # 字符串后 info/v2 仍然 400。
+            "resourceId": _as_int(resource_id, 0),
         }
-        # songid 是查重接口返回的字符串；查重返回 0 时也要提交 "0"，
+        # SPlayer-Next 把查重接口返回的 songId 原样作为数字提交，0 也提交；
         # 只有响应里完全没有 songId 时才省略。
         if song_id is not None:
-            payload["songid"] = str(song_id)
+            payload["songid"] = int(song_id)
         logger.debug("提交云盘信息: %s", payload)
         try:
             body = self._eapi_api("/api/upload/cloud/info/v2", payload)
         except ApiError as exc:
             logger.error(
-                "提交云盘信息失败: filename=%r songid=%r resourceId=%r error=%s",
+                "提交云盘信息失败: filename=%r songid=%r resourceId=%r host=%s appver=%s nmtid=%s error=%s",
                 filename,
                 payload.get("songid"),
                 payload.get("resourceId"),
+                EAPI_PC_URL,
+                EAPI_CLOUD_APPVER,
+                "yes" if self.cookies.get("NMTID") else "no",
                 exc,
             )
             raise
@@ -700,10 +710,11 @@ class CloudClient:
         return new_id
 
     def publish(self, song_id: int) -> None:
-        # pub/v2 与 info/v2 同属新版写入接口，必须一起走 eapi。
+        # pub/v2 与 info/v2 同属新版写入接口，必须一起走 eapi；
+        # songid 与 info 返回保持一致，用 JSON 数字。
         self._eapi_api(
             "/api/cloud/pub/v2",
-            {"songid": str(song_id)},
+            {"songid": int(song_id)},
         )
 
     def upload(

@@ -73,7 +73,7 @@ weapi 请求的 URL 必须使用 `/weapi/...`。NCMApi 在发送前会把代码�
 2026-11 起，`/api/upload/cloud/info/v2` 和 `/api/cloud/pub/v2` 通过 weapi 调用会返回 `[400] 接口调用失败`，必须改用 eapi：
 
 ```http
-POST https://interface.music.163.com/eapi/upload/cloud/info/v2
+POST https://interfacepc.music.163.com/eapi/upload/cloud/info/v2
 Content-Type: application/x-www-form-urlencoded
 User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
 Cookie: <header map 的 URL 编码 k=v 对>
@@ -81,7 +81,7 @@ Cookie: <header map 的 URL 编码 k=v 对>
 params=<AES-128-ECB 十六进制大写>
 ```
 
-加密前的 JSON 是业务字段加上 `header` 和 `e_r=false`。`header` 至少包含 `osver`、`deviceId`（52 位大写 hex）、`os`、`appver`、`versioncode`、`mobilename`、`buildver`、`resolution`、`__csrf`、`channel`、`requestId`，登录后还要带 `MUSIC_U`（有匿名 token 时带 `MUSIC_A`）。Cookie 头由同一份 `header` 按 `k=v` 做 URL 编码后拼接，不是直接复用登录 Cookie。
+加密前的 JSON 是业务字段加上 `header` 和 `e_r=false`。`header` 至少包含 `osver`、`deviceId`（52 位大写 hex）、`os`、`appver`、`versioncode`、`mobilename`、`buildver`、`resolution`、`__csrf`、`channel`、`requestId`，登录后还要带 `MUSIC_U`（有匿名 token 时带 `MUSIC_A`），并带上 `NMTID`。云盘写入使用 PC 身份：`appver=3.1.29.205117`、`osver=Microsoft-Windows-10-Professional-build-19045-64bit`，域名是 `interfacepc.music.163.com`。Cookie 头由同一份 `header` 按 `k=v` 做 URL 编码后拼接，不是直接复用登录 Cookie。0.2.14 漏了 `NMTID` 且用了 `interface.music.163.com`，info/v2 仍会返回 [400] 接口调用失败。
 
 加密步骤：
 
@@ -93,7 +93,7 @@ plain     = uri + "-36cd479b6b5-" + text + "-36cd479b6b5-" + md5_text
 params    = AES-128-ECB(plain, "e82ckenh8dichen8") -> hex 大写
 ```
 
-请求 URL 是 `https://interface.music.163.com/eapi/` 加上 `uri` 去掉 `/api/` 后的部分；加密和签名仍然使用完整的 `/api/...` uri。
+请求 URL 是 `https://interfacepc.music.163.com/eapi/` 加上 `uri` 去掉 `/api/` 后的部分；加密和签名仍然使用完整的 `/api/...` uri。
 
 ## 4. 云盘列表
 
@@ -175,16 +175,16 @@ POST http://<host>/<bucket>/<objectKey>
 ## 9. 写入云盘信息（eapi）
 
 ```http
-POST https://interface.music.163.com/eapi/upload/cloud/info/v2
+POST https://interfacepc.music.163.com/eapi/upload/cloud/info/v2
 ```
 
 eapi 业务明文（加密前还会加上 `header` 和 `e_r=false`）：
 
 ```json
-{"md5":"<md5>","songid":"<check 返回的 songId 字符串>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":"<同一个 NOS token 的 resourceId 字符串>"}
+{"md5":"<md5>","songid":<check 返回的 songId 数字>,"filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<同一个 NOS token 的 resourceId 数字>}
 ```
 
-字段要求：`songid` 用 check 返回的 `songId` 转成字符串提交，返回 0 时提交 `"0"`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是来自第 6 步实际用于上传的那个 NOS token 的字符串，传整数或空桶 token 的 resourceId 都会返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
+字段要求：`songid` 用 check 返回的 `songId`，按 JSON 数字提交，返回 0 时提交 `0`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是来自第 6 步实际用于上传的那个 NOS token 的 `resourceId`，按 JSON 数字提交，空桶 token 或字符串都可能返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
 
 标签缺失时回退：`song` 用文件名，`album` 用“未知专辑”，`artist` 用“未知艺术家”。
 
@@ -193,13 +193,13 @@ eapi 业务明文（加密前还会加上 `header` 和 `e_r=false`）：
 ## 10. 发布到云盘（eapi）
 
 ```http
-POST https://interface.music.163.com/eapi/cloud/pub/v2
+POST https://interfacepc.music.163.com/eapi/cloud/pub/v2
 ```
 
 eapi 业务明文（同样带 `header`、`e_r=false` 并加密）：
 
 ```json
-{"songid":"<info v2 返回的 songId>"}
+{"songid":<info v2 返回的 songId 数字>}
 ```
 
 成功后可在云盘列表看到。
@@ -222,7 +222,7 @@ check(md5,size)
 | --- | --- |
 | `code=301/302` | Cookie 失效、未登录、风控 |
 | `code=400` / `[400] 参数错误` | 参数不合法，或把 weapi 加密表单发到了 `/api/...` 而不是 `/weapi/...`（不是登录问题） |
-| `info/v2` 返回 `[400] 接口调用失败` | 云盘写入仍走 weapi；2026-11 起必须改用 eapi，且 `resourceId`、`songid` 按字符串提交 |
+| `info/v2` 返回 `[400] 接口调用失败` | 云盘写入仍走 weapi；2026-11 起必须改用 `interfacepc.music.163.com` 的 eapi，PC appver `3.1.29.205117`，header/Cookie 带 `NMTID`，`resourceId`、`songid` 用 JSON 数字 |
 | `code=405` | 操作频繁，被限流；应停止本轮并等待冷却，不能按文件重试刷请求 |
 | `code=429` | 请求过多，与 405 同类，按限流处理 |
 | NOS 403 / token 无效 | token 过期、objectKey 路径不对、Content-MD5 不匹配 |
