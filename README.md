@@ -2,7 +2,7 @@
 
 把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用，带 Web 管理界面、扫码登录，以及**本地 MD5 + 云端 upload/check 双重去重**。
 
-> 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端逆向出的 weapi / NOS 上传链路，接口随时可能变化。请先看[风险与限制](#风险与限制)。
+> 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端逆向出的 weapi / eapi / NOS 上传链路，接口随时可能变化。请先看[风险与限制](#风险与限制)。
 
 ![Web UI 登录页](docs/images/webui.png)
 
@@ -24,7 +24,7 @@
 - **扫码登录**：界面生成网易云登录二维码，手机 App 扫码确认即可；登录态保存在应用数据目录。
 - **双重去重**：
   1. **本地去重**：内容相同（MD5 相同）的多个文件只上传一份，其余标记为 `skipped_local`；
-  2. **云端去重**：每次真正上传前调用 `/weapi/cloud/upload/check`，`needUpload=false` 说明云盘已有，标记为 `skipped_remote`。
+  2. **云端去重**：每次真正上传前调用 `/weapi/cloud/upload/check`，`needUpload=false` 说明文件字节已在对象存储，仍需 info/v2 + pub/v2 补建云盘条目。
 - **增量同步**：SQLite 记录 `path + size + mtime_ns + md5 + status`，文件没变不重复计算、不重复上传。
 - **安全试跑**：界面里的“演练”只检查并显示计划，不分配 token、不上传、不写上传状态。
 - **多目录 / 多格式**：可配置多个音乐目录；支持 mp3、flac、m4a、aac、ogg、opus、wav 等。
@@ -42,11 +42,11 @@
    ├─ 计算 MD5
    │    ├─ 本地已有同 MD5 ──► skipped_local
    │    └─ 云端 check: needUpload=false ──► 跳过字节上传，但仍需 info/v2 + pub/v2 补建云盘条目
-   └─ 上传：token alloc A →（需要时）token alloc B → NOS → info/v2 → pub/v2
+   └─ 上传：单个 NOS token alloc →（需要时）NOS 上传 → eapi info/v2 → eapi pub/v2
           └─ 成功 ──► uploaded（记录 songId）
 ```
 
-去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 info/v2 + pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。
+去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。
 
 ## 安装（飞牛 NAS，推荐）
 
@@ -60,7 +60,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.13.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.14.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -148,7 +148,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.13** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.14** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -164,11 +164,11 @@ var/
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.13，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。升级到 0.2.14，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.11 及更早版本在提交云盘信息时把 `resourceId` 当成字符串、把空的 `songid` 传成 0，并用不带扩展名的标题作为 `filename`。网易云会返回 [400] 接口调用失败（`/weapi/upload/cloud/info/v2`）。0.2.12 改为整数 `resourceId`、空 `songid` 直接省略、`filename` 使用真实文件名（含扩展名），`song` 仍用标题，且不发送 `objectKey`。0.2.12 仍可能返回同样的 400：它先用空桶 token 的 `resourceId` 提交，却用另一个 NOS 桶 token 上传文件。0.2.13 只申请一个 NOS 桶 token，上传和 `resourceId` 提交都用同一个 token，不再申请空桶 token；查重返回 `songId=0` 时提交字符串 `"0"`，只有响应完全没有 `songId` 时才省略。升级到 0.2.13，停止再启动应用后重试。若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid 和 resourceId，请连同诊断信息反馈。
+0.2.13 及更早版本用 weapi 提交云盘信息（`/weapi/upload/cloud/info/v2`），2026-11 起该写入接口已失效，无论参数怎么调都返回 [400] 接口调用失败。0.2.14 改为网易云手机客户端的 eapi：`POST https://interface.music.163.com/eapi/upload/cloud/info/v2`，请求体附带 `header` 与 `e_r=false` 后用 AES-128-ECB 加密，Cookie 里带 `MUSIC_U`。提交字段保持：`resourceId` 用同一个 NOS token 的字符串值、`songid` 用 check 返回值的字符串（0 就提交 `"0"`）、`filename` 用真实文件名（含扩展名）、`song` 用标题，不发 `objectKey`；发布接口 `pub/v2` 同样改走 eapi。升级到 0.2.14，停止再启动应用后重试。若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid 和 resourceId，请连同诊断信息反馈。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 

@@ -10,7 +10,7 @@
 MUSIC_U=...; __csrf=...
 ```
 
-每次 weapi 请求：
+除云盘写入外，每次 weapi 请求：
 
 - URL 追加 `csrf_token=<__csrf 的值>`（没有就空字符串）；
 - Header `Referer: https://music.163.com`；
@@ -67,6 +67,33 @@ weapi 明文：`{}`
 ## 3.1 weapi 路径约定
 
 weapi 请求的 URL 必须使用 `/weapi/...`。NCMApi 在发送前会把代码里的 `/api/...` 改写成 `/weapi/...`；如果直接把加密表单发到 `/api/...`，网关会按明文参数校验并返回 `[400] 参数错误`。本文件下面的路径都已经写成实际请求路径。
+
+## 3.2 eapi 云盘写入
+
+2026-11 起，`/api/upload/cloud/info/v2` 和 `/api/cloud/pub/v2` 通过 weapi 调用会返回 `[400] 接口调用失败`，必须改用 eapi：
+
+```http
+POST https://interface.music.163.com/eapi/upload/cloud/info/v2
+Content-Type: application/x-www-form-urlencoded
+User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
+Cookie: <header map 的 URL 编码 k=v 对>
+
+params=<AES-128-ECB 十六进制大写>
+```
+
+加密前的 JSON 是业务字段加上 `header` 和 `e_r=false`。`header` 至少包含 `osver`、`deviceId`（52 位大写 hex）、`os`、`appver`、`versioncode`、`mobilename`、`buildver`、`resolution`、`__csrf`、`channel`、`requestId`，登录后还要带 `MUSIC_U`（有匿名 token 时带 `MUSIC_A`）。Cookie 头由同一份 `header` 按 `k=v` 做 URL 编码后拼接，不是直接复用登录 Cookie。
+
+加密步骤：
+
+```text
+uri       = /api/upload/cloud/info/v2
+text      = 紧凑 JSON
+md5_text  = md5("nobody" + uri + "use" + text + "md5forencrypt")
+plain     = uri + "-36cd479b6b5-" + text + "-36cd479b6b5-" + md5_text
+params    = AES-128-ECB(plain, "e82ckenh8dichen8") -> hex 大写
+```
+
+请求 URL 是 `https://interface.music.163.com/eapi/` 加上 `uri` 去掉 `/api/` 后的部分；加密和签名仍然使用完整的 `/api/...` uri。
 
 ## 4. 云盘列表
 
@@ -145,37 +172,37 @@ POST http://<host>/<bucket>/<objectKey>
 - Header `Content-Type: audio/mpeg`（按实际格式可调整）；
 - Body 是文件原始字节，`Content-Length` 必须准确。
 
-## 9. 写入云盘信息
+## 9. 写入云盘信息（eapi）
 
 ```http
-POST https://music.163.com/weapi/upload/cloud/info/v2
+POST https://interface.music.163.com/eapi/upload/cloud/info/v2
 ```
 
-weapi 明文：
+eapi 业务明文（加密前还会加上 `header` 和 `e_r=false`）：
 
 ```json
-{"md5":"<md5>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<同一个 NOS token 的 resourceId 整数>}
+{"md5":"<md5>","songid":"<check 返回的 songId 字符串>","filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":"<同一个 NOS token 的 resourceId 字符串>"}
 ```
 
-字段要求：`songid` 用 check 返回的 `songId` 转成字符串提交，返回 0 时提交 `"0"`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是整数且来自第 6 步实际用于上传的那个 NOS token，传字符串或空桶 token 的 resourceId 都会返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
+字段要求：`songid` 用 check 返回的 `songId` 转成字符串提交，返回 0 时提交 `"0"`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是来自第 6 步实际用于上传的那个 NOS token 的字符串，传整数或空桶 token 的 resourceId 都会返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
 
 标签缺失时回退：`song` 用文件名，`album` 用“未知专辑”，`artist` 用“未知艺术家”。
 
 返回新的 `songId`。
 
-## 10. 发布到云盘
+## 10. 发布到云盘（eapi）
 
 ```http
-POST https://music.163.com/weapi/cloud/pub/v2
+POST https://interface.music.163.com/eapi/cloud/pub/v2
 ```
 
-weapi 明文：
+eapi 业务明文（同样带 `header`、`e_r=false` 并加密）：
 
 ```json
 {"songid":"<info v2 返回的 songId>"}
 ```
 
-成功后可被云盘列表看到。
+成功后可在云盘列表看到。
 
 ## 11. 完整顺序
 
@@ -185,8 +212,8 @@ check(md5,size)
   └─ token/alloc bucket=jd-musicrep-...   -> resourceId, objectKey, token
        ├─ GET lbs                              -> host
        ├─ needUpload=true: POST NOS (文件字节) -> 上传完成
-       ├─ info/v2 (md5,songid,resourceId,...)  -> songId
-       └─ pub/v2 (songid)                      -> 发布
+       ├─ info/v2 (eapi, md5,songid,resourceId) -> songId
+       └─ pub/v2 (eapi, songid)                -> 发布
 ```
 
 ## 12. 常见错误
@@ -194,7 +221,8 @@ check(md5,size)
 | 现象 | 可能原因 |
 | --- | --- |
 | `code=301/302` | Cookie 失效、未登录、风控 |
-| `code=400` | 参数不合法，或把 weapi 加密表单发到了 `/api/...` 而不是 `/weapi/...`（不是登录问题） |
+| `code=400` / `[400] 参数错误` | 参数不合法，或把 weapi 加密表单发到了 `/api/...` 而不是 `/weapi/...`（不是登录问题） |
+| `info/v2` 返回 `[400] 接口调用失败` | 云盘写入仍走 weapi；2026-11 起必须改用 eapi，且 `resourceId`、`songid` 按字符串提交 |
 | `code=405` | 操作频繁，被限流；应停止本轮并等待冷却，不能按文件重试刷请求 |
 | `code=429` | 请求过多，与 405 同类，按限流处理 |
 | NOS 403 / token 无效 | token 过期、objectKey 路径不对、Content-MD5 不匹配 |
@@ -215,3 +243,5 @@ check(md5,size)
 - [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)
 - [lulu-ls/cloud-uploader](https://github.com/lulu-ls/cloud-uploader)
 - [Binaryify/NeteaseCloudMusicApi#1851](https://github.com/Binaryify/NeteaseCloudMusicApi/pull/1851)
+- [SPlayer-Dev/ncm-api-rs](https://github.com/SPlayer-Dev/ncm-api-rs)：eapi 云盘写入、header/Cookie 构造的当前参考
+- [SPlayer-Dev/SPlayer-Next](https://github.com/SPlayer-Dev/SPlayer-Next)：单个 NOS token 的完整上传顺序

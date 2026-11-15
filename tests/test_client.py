@@ -87,12 +87,12 @@ def test_finish_upload_matches_official_payload() -> None:
     client = make_client()
     captured: dict = {}
 
-    def fake_weapi(path, payload=None, **kwargs):
+    def fake_eapi(path, payload=None, **kwargs):
         assert path == "/api/upload/cloud/info/v2"
         captured.update(payload)
         return {"code": 200, "songId": "123", "songIdLong": 123}
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
+    client._eapi_api = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
         song_id=None,
@@ -103,8 +103,8 @@ def test_finish_upload_matches_official_payload() -> None:
         resource_id=36656729598,
     )
     assert new_id == 123
-    assert captured["resourceId"] == 36656729598
-    assert isinstance(captured["resourceId"], int)
+    assert captured["resourceId"] == "36656729598"
+    assert isinstance(captured["resourceId"], str)
     assert "songid" not in captured
     assert captured["filename"] == "A - B.mp3"
     assert captured["song"] == "B"
@@ -114,11 +114,11 @@ def test_finish_upload_string_song_id_and_resource_id() -> None:
     client = make_client()
     captured: dict = {}
 
-    def fake_weapi(path, payload=None, **kwargs):
+    def fake_eapi(path, payload=None, **kwargs):
         captured.update(payload)
         return {"code": 200, "songId": "7"}
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
+    client._eapi_api = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
         song_id=7,
@@ -130,18 +130,18 @@ def test_finish_upload_string_song_id_and_resource_id() -> None:
     )
     assert new_id == 7
     assert captured["songid"] == "7"
-    assert captured["resourceId"] == 42
+    assert captured["resourceId"] == "42"
 
 
 def test_finish_upload_submits_zero_song_id() -> None:
     client = make_client()
     captured: dict = {}
 
-    def fake_weapi(path, payload=None, **kwargs):
+    def fake_eapi(path, payload=None, **kwargs):
         captured.update(payload or {})
         return {"code": 200, "songId": "5"}
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
+    client._eapi_api = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
         song_id=0,
@@ -267,6 +267,58 @@ def test_weapi_rewrites_api_path_to_weapi() -> None:
     client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
     client._weapi("/api/cloud/upload/check", {})
     assert seen == ["/weapi/cloud/upload/check"]
+
+
+def test_eapi_cloud_info_request_shape() -> None:
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["ua"] = request.headers.get("user-agent", "")
+        captured["cookie"] = request.headers.get("cookie", "")
+        captured["body"] = request.content.decode("utf-8")
+        return httpx.Response(200, json={"code": 200, "songId": "1"})
+
+    client = CloudClient(
+        {"MUSIC_U": "music-u", "__csrf": "csrf"},
+        transport=httpx.MockTransport(handler),
+        retries=0,
+        rate_limit=0,
+    )
+    body = client._eapi_api(
+        "/api/upload/cloud/info/v2",
+        {"md5": "abc", "resourceId": "42"},
+    )
+    assert body["code"] == 200
+    assert captured["url"] == "https://interface.music.163.com/eapi/upload/cloud/info/v2"
+    assert "NeteaseMusic 9.0.90" in captured["ua"]
+    assert "MUSIC_U=music-u" in captured["cookie"]
+
+    form = parse_qs(captured["body"])
+    plain = AES.new(EAPI_KEY, AES.MODE_ECB).decrypt(bytes.fromhex(form["params"][0]))
+    text = plain[:-plain[-1]].decode("utf-8")
+    parts = text.split("-36cd479b6b5-")
+    assert parts[0] == "/api/upload/cloud/info/v2"
+    payload = json.loads(parts[1])
+    assert payload["e_r"] is False
+    assert payload["header"]["MUSIC_U"] == "music-u"
+    assert payload["header"]["deviceId"]
+    assert payload["resourceId"] == "42"
+
+
+def test_publish_uses_eapi() -> None:
+    client = make_client()
+    captured = {}
+
+    def fake_eapi(path, payload=None, **kwargs):
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"code": 200}
+
+    client._eapi_api = fake_eapi  # type: ignore[method-assign]
+    client.publish(99)
+    assert captured["path"] == "/api/cloud/pub/v2"
+    assert captured["payload"] == {"songid": "99"}
 
 
 def test_cloud_songs_pagination() -> None:

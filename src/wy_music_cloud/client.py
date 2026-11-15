@@ -61,6 +61,10 @@ EAPI_PC_USER_AGENT = (
     "(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 "
     "NeteaseMusicDesktop/3.1.29.205117"
 )
+# 云盘写入接口的当前可用形态：interface eapi + iPhone 客户端头。
+# 只把 info/v2 和 pub/v2 走 weapi 会返回 [400] 接口调用失败。
+EAPI_URL = "https://interface.music.163.com"
+EAPI_IPHONE_USER_AGENT = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)"
 
 
 @dataclass
@@ -322,6 +326,62 @@ class CloudClient:
             form,
             headers={
                 "User-Agent": EAPI_PC_USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": cookie,
+            },
+            check=check,
+            cookie_sink=lines,
+        )
+        self._absorb_cookie_lines(lines)
+        return result
+
+    def _eapi_api(
+        self,
+        uri: str,
+        payload: dict[str, Any],
+        *,
+        check: bool = True,
+    ) -> dict[str, Any]:
+        """用手机客户端 eapi 调用云盘写入接口。
+
+        2026-11 起 /api/upload/cloud/info/v2 与 /api/cloud/pub/v2 走
+        weapi 会返回 [400] 接口调用失败；当前可用实现（ncm-api-rs）使用
+        interface.music.163.com 的 eapi，并在请求体 header 与 Cookie 中
+        带上登录态和设备信息。
+        """
+        device_id = self._ensure_anonymous_device()
+        now_ms = int(time.time() * 1000)
+        header = {
+            "osver": str(self.cookies.get("osver") or ANON_OSVER),
+            "deviceId": device_id,
+            "os": str(self.cookies.get("os") or "pc"),
+            "appver": str(self.cookies.get("appver") or ANON_APPVER),
+            "versioncode": str(self.cookies.get("versioncode") or "140"),
+            "mobilename": str(self.cookies.get("mobilename") or ""),
+            "buildver": str(self.cookies.get("buildver") or int(now_ms / 1000)),
+            "resolution": str(self.cookies.get("resolution") or "1920x1080"),
+            "__csrf": str(self.cookies.get("__csrf") or ""),
+            "channel": str(self.cookies.get("channel") or "netease"),
+            "requestId": f"{now_ms}_{secrets.randbelow(1000):04d}",
+        }
+        for name in ("MUSIC_U", "MUSIC_A"):
+            value = self.cookies.get(name)
+            if value:
+                header[name] = str(value)
+        body = dict(payload)
+        body["e_r"] = False
+        body["header"] = header
+        form = encrypt_eapi(uri, body)
+        cookie = "; ".join(
+            f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
+            for key, value in header.items()
+        )
+        lines: list[str] = []
+        result = self._post_json(
+            EAPI_URL + "/eapi/" + uri[len("/api/"):],
+            form,
+            headers={
+                "User-Agent": EAPI_IPHONE_USER_AGENT,
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Cookie": cookie,
             },
@@ -614,8 +674,9 @@ class CloudClient:
             "album": album,
             "artist": artist,
             "bitrate": bitrate,
-            # 官方客户端把 resourceId 作为整数提交；传字符串会得到 400 接口调用失败。
-            "resourceId": _as_int(resource_id, 0),
+            # eapi 客户端（ncm-api-rs）把 resourceId 作为字符串提交；
+            # 0.2.12/0.2.13 的 weapi info/v2 无论整数还是字符串都返回 400。
+            "resourceId": str(resource_id),
         }
         # songid 是查重接口返回的字符串；查重返回 0 时也要提交 "0"，
         # 只有响应里完全没有 songId 时才省略。
@@ -623,7 +684,7 @@ class CloudClient:
             payload["songid"] = str(song_id)
         logger.debug("提交云盘信息: %s", payload)
         try:
-            body = self._weapi("/api/upload/cloud/info/v2", payload)
+            body = self._eapi_api("/api/upload/cloud/info/v2", payload)
         except ApiError as exc:
             logger.error(
                 "提交云盘信息失败: filename=%r songid=%r resourceId=%r error=%s",
@@ -639,9 +700,10 @@ class CloudClient:
         return new_id
 
     def publish(self, song_id: int) -> None:
-        self._weapi(
+        # pub/v2 与 info/v2 同属新版写入接口，必须一起走 eapi。
+        self._eapi_api(
             "/api/cloud/pub/v2",
-            {"songid": song_id},
+            {"songid": str(song_id)},
         )
 
     def upload(
