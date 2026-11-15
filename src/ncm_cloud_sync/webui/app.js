@@ -431,6 +431,21 @@
     renderProgress(sync.progress);
   }
 
+  function renderPending(stats, scan) {
+    var hint = el("statPendingHint");
+    if (scan && typeof scan.to_upload === "number") {
+      el("statPending").textContent = scan.to_upload;
+      hint.textContent = scan.incomplete ? "上次仅扫描未完成" : "来自最近一次仅扫描";
+      hint.title = scan.finished_at ? "仅扫描完成于 " + formatRunTime(scan.finished_at) : "";
+      hint.classList.remove("hidden");
+    } else {
+      el("statPending").textContent = stats.pending || 0;
+      hint.textContent = "";
+      hint.title = "";
+      hint.classList.add("hidden");
+    }
+  }
+
   function renderStatus(data) {
     state.status = data;
     el("version").textContent = "v" + data.version;
@@ -449,7 +464,7 @@
       : "账号信息将在下一次刷新时更新";
     var stats = data.stats || {};
     el("statUploaded").textContent = stats.uploaded || 0;
-    el("statPending").textContent = stats.pending || 0;
+    renderPending(stats, data.pending_scan);
     var failed = stats.failed || 0;
     var permission = stats.permission || 0;
     el("statProblems").textContent = failed + permission;
@@ -587,6 +602,114 @@
     }).catch(function (error) {
       el("problemStatus").textContent = error.message;
       showToast(error.message, true);
+    });
+  }
+
+  function renderPermission(data) {
+    var box = el("permissionResult");
+    box.textContent = "";
+    var ok = Boolean(data.ok);
+    var summary = make("div", "permission-summary " + (ok ? "ok" : "warn"));
+    summary.appendChild(make("strong", "", ok ? "权限正常" : "发现权限问题"));
+    var parts = ["应用账号 " + (data.user || "-")];
+    parts.push("检查 " + (data.files || 0) + " 个音频文件");
+    if (data.dirs) {
+      parts.push("子目录 " + data.dirs);
+    }
+    summary.appendChild(make("span", "", parts.join(" · ")));
+    box.appendChild(summary);
+
+    if (data.error) {
+      box.appendChild(make("p", "permission-error", data.error));
+    }
+
+    var dirs = data.directories || [];
+    if (dirs.length) {
+      var dirBox = make("div", "permission-dirs");
+      dirs.forEach(function (dir) {
+        var bad = !dir.exists || !dir.readable || dir.unreadable_files || dir.unreadable_dirs;
+        var row = make("div", "permission-dir" + (bad ? " warn" : ""));
+        row.appendChild(make("span", "permission-dir-path", dir.path));
+        var meta;
+        if (!dir.exists) {
+          meta = "目录不存在";
+        } else if (!dir.readable) {
+          meta = "应用账号无法进入";
+        } else {
+          var metaParts = ["音频 " + (dir.files || 0)];
+          if (dir.unreadable_files) {
+            metaParts.push("无权限 " + dir.unreadable_files);
+          }
+          if (dir.unreadable_dirs) {
+            metaParts.push("无法进入目录 " + dir.unreadable_dirs);
+          }
+          if (dir.truncated) {
+            metaParts.push("未检查完");
+          }
+          meta = metaParts.join(" · ");
+        }
+        row.appendChild(make("span", "permission-dir-meta", meta));
+        dirBox.appendChild(row);
+      });
+      box.appendChild(dirBox);
+    }
+
+    var samples = data.samples || [];
+    if (samples.length) {
+      box.appendChild(make("p", "muted", "无权限示例（最多显示 20 个）："));
+      var sampleBox = make("div", "permission-samples");
+      samples.forEach(function (sample) {
+        var row = make("div", "permission-sample");
+        row.appendChild(make("div", "permission-sample-path",
+          "[" + (sample.kind === "dir" ? "目录" : "文件") + "] " + sample.path));
+        row.appendChild(make("div", "permission-sample-error", sample.error || "无法访问"));
+        sampleBox.appendChild(row);
+      });
+      box.appendChild(sampleBox);
+    }
+
+    if (data.truncated) {
+      box.appendChild(make("p", "muted", "检查达到上限，结果可能不完整；可以缩短音乐目录后重试。"));
+    }
+
+    var commands = data.commands || [];
+    if (commands.length) {
+      var actions = make("div", "actions");
+      actions.appendChild(make("span", "muted", "在 fnOS 以 root 执行："));
+      var copy = make("button", "btn tiny ghost", "复制修复命令");
+      copy.type = "button";
+      copy.addEventListener("click", function () {
+        copyText(commands.join("\n")).then(function () {
+          showToast("修复命令已复制");
+        }).catch(function (error) {
+          showToast(error.message, true);
+        });
+      });
+      actions.appendChild(copy);
+      box.appendChild(actions);
+      box.appendChild(make("pre", "permission-commands", commands.join("\n")));
+    } else if (ok) {
+      box.appendChild(make("p", "muted", "应用账号可以读取当前配置的音乐目录，无需处理。"));
+    }
+
+    if (data.checked_at) {
+      box.appendChild(make("p", "muted", "检查时间 " + formatDate(data.checked_at)));
+    }
+  }
+
+  function checkPermissions() {
+    var button = el("permissionCheckButton");
+    var box = el("permissionResult");
+    button.disabled = true;
+    box.textContent = "";
+    box.appendChild(make("p", "muted", "正在检查音乐目录权限…"));
+    api("/api/permissions/check").then(function (data) {
+      renderPermission(data);
+    }).catch(function (error) {
+      box.textContent = "";
+      box.appendChild(make("p", "permission-error", error.message));
+    }).finally(function () {
+      button.disabled = false;
     });
   }
 
@@ -1325,6 +1448,7 @@
       el("notifyStatus").textContent = "有未保存的修改";
     });
     el("refreshProblems").addEventListener("click", function () { loadProblems(state.problemKind, false); });
+    el("permissionCheckButton").addEventListener("click", checkPermissions);
     el("retryProblems").addEventListener("click", retryProblems);
     el("checkUpdateButton").addEventListener("click", function () { loadUpdate(true); });
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (item) {

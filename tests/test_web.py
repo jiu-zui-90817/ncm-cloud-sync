@@ -103,6 +103,7 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["sync"]["state"] == "idle"
     assert data["sync"]["can_pause"] is False
     assert data["runs"] == []
+    assert data["pending_scan"] is None
     status, headers, _ = call(app, "/")
     assert status == "200 OK"
     assert headers["Content-Type"].startswith("text/html")
@@ -620,6 +621,47 @@ def test_runs_api_and_status(tmp_path: Path) -> None:
     status, _, data = call(app, "/api/runs", query="limit=1")
     assert status == "200 OK"
     assert len(data["runs"]) == 1
+
+
+def test_permissions_check_api(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    (app.config.music_dirs[0] / "a.mp3").write_bytes(b"a")
+
+    status, _, data = call(app, "/api/permissions/check")
+
+    assert status == "200 OK"
+    assert data["ok"] is True
+    assert data["files"] == 1
+    assert data["directories"][0]["path"] == str(app.config.music_dirs[0])
+    assert isinstance(data["commands"], list)
+    assert isinstance(data["notes"], list)
+
+
+def test_status_uses_latest_scan_for_pending(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        run_id = state.start_run("scan")
+        state.finish_run(run_id, stats={"mode": "scan", "to_upload": 7})
+
+    status, _, data = call(app, "/api/status")
+
+    assert status == "200 OK"
+    assert data["runs"][0]["mode"] == "scan"
+    assert data["pending_scan"] == {
+        "run_id": run_id,
+        "finished_at": data["runs"][0]["finished_at"],
+        "to_upload": 7,
+        "incomplete": False,
+    }
+
+    with StateStore(app.config.db_path) as state:
+        normal_id = state.start_run("sync")
+        state.finish_run(normal_id, uploaded=1)
+
+    status, _, data = call(app, "/api/status")
+    assert status == "200 OK"
+    assert data["runs"][0]["mode"] == "sync"
+    assert data["pending_scan"] is None
 
 
 def test_run_detail_api(tmp_path: Path) -> None:

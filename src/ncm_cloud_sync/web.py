@@ -28,6 +28,7 @@ from .config import Config
 from .cookies import ensure_defaults, parse_cookie
 from .errors import ApiError, AuthError, ConfigError, UploadError, NcmSyncError
 from .login import apply_qr_cookies, build_qr_url
+from .permissions import audit_permissions
 from .session import load_session, save_session
 from .state import StateStore
 from .syncer import SyncStats, Syncer
@@ -827,6 +828,14 @@ class WebApp:
                 )
             if path == "/api/diagnostics" and method == "GET":
                 return self._json(start_response, "200 OK", self._diagnostics())
+            if path == "/api/permissions/check" and method == "GET":
+                report = audit_permissions(
+                    self.config.music_dirs,
+                    self.config.extensions,
+                    exclude=self.config.exclude,
+                    exclude_dirs=self.config.exclude_dirs,
+                )
+                return self._json(start_response, "200 OK", report)
             if path == "/api/qr/status" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 key = (query.get("key") or [""])[0]
@@ -981,6 +990,7 @@ class WebApp:
         stats: dict[str, int] = {}
         problem_counts: dict[str, int] = {"failed": 0, "permission": 0}
         runs: list[dict[str, Any]] = []
+        pending_scan: dict[str, Any] | None = None
         try:
             with StateStore(self.config.db_path) as state:
                 stats = state.stats()
@@ -988,6 +998,19 @@ class WebApp:
                 runs = state.recent_runs(RUN_HISTORY_LIMIT)
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
+        if runs and runs[0].get("mode") == "scan":
+            latest = runs[0]
+            scan_stats = latest.get("stats") or {}
+            try:
+                to_upload = int(scan_stats.get("to_upload") or 0)
+            except (TypeError, ValueError):
+                to_upload = 0
+            pending_scan = {
+                "run_id": latest.get("id"),
+                "finished_at": latest.get("finished_at"),
+                "to_upload": to_upload,
+                "incomplete": bool(latest.get("error")),
+            }
         dirs = []
         for directory in self.config.music_dirs:
             dirs.append(
@@ -1025,6 +1048,7 @@ class WebApp:
             },
             "sync": self.sync.status(),
             "runs": runs,
+            "pending_scan": pending_scan,
         }
 
     def _diagnostics(self) -> dict[str, Any]:
@@ -1245,7 +1269,3 @@ def main() -> int:
             except OSError:
                 pass
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -92,7 +92,7 @@
 
         <section class="stats-grid">
           <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
-          <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong></article>
+          <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong><small id="statPendingHint" class="stat-hint hidden"></small></article>
           <article class="stat clickable" data-problem-kind="all" tabindex="0" role="button" title="查看失败和无权限文件"><span class="stat-label">问题文件</span><strong id="statProblems">0</strong><small class="stat-link" id="statProblemBreakdown">失败 0 · 无权限 0</small></article>
           <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
           <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
@@ -145,6 +145,20 @@
       </div>
 
       <div id="page-problems" class="page hidden">
+        <section class="card">
+          <div class="card-head">
+            <div>
+              <h2>权限体检</h2>
+              <p class="muted">检查应用账号能否读取音乐目录里的音频文件。只检查，不修改权限。</p>
+            </div>
+            <div class="actions">
+              <button id="permissionCheckButton" class="btn ghost" type="button">开始体检</button>
+            </div>
+          </div>
+          <div id="permissionResult" class="permission-result">
+            <p class="muted">尚未检查。如果同步时出现“没有读取权限”，先运行体检。</p>
+          </div>
+        </section>
         <section class="card">
           <div class="card-head">
             <div>
