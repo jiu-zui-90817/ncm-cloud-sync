@@ -26,6 +26,7 @@ class SyncStats:
     scanned: int = 0
     up_to_date: int = 0
     uploaded: int = 0
+    linked: int = 0
     skipped_local: int = 0
     skipped_remote: int = 0
     planned: int = 0
@@ -53,7 +54,8 @@ class SyncStats:
     def summary(self) -> str:
         return (
             f"扫描 {self.scanned}，上传 {self.uploaded}，"
-            f"已存在/跳过 {self.skipped}（本地重复 {self.skipped_local}，"
+            + (f"补建 {self.linked}，" if self.linked else "")
+            + f"已存在/跳过 {self.skipped}（本地重复 {self.skipped_local}，"
             f"云端已有 {self.skipped_remote}，未变更 {self.up_to_date}），"
             f"失败 {self.failed}"
             + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
@@ -96,6 +98,7 @@ class Syncer:
         self.progress = progress
         self.stop_event = stop_event
         self.pause_event = pause_event
+        self._cloud_md5: dict[str, int] = {}
 
     def _notify(self, event: str, payload: dict[str, Any]) -> None:
         if self.progress is None:
@@ -163,6 +166,17 @@ class Syncer:
         )
         known = {str(item.path) for item in files}
         logger.info("发现 %d 个候选音频文件", len(files))
+        self._cloud_md5 = {}
+        loader = getattr(self.client, "cloud_song_md5_map", None)
+        if callable(loader):
+            try:
+                self._cloud_md5 = dict(loader() or {})
+            except Exception as exc:
+                logger.warning("读取云盘列表失败，本轮跳过云端对账: %s", exc)
+            else:
+                logger.info(
+                    "云盘已有 %d 个不同 MD5，已用于同步前对账", len(self._cloud_md5)
+                )
         processed = 0
         try:
             self._mark_ignored_excluded(known)
@@ -335,6 +349,22 @@ class Syncer:
             )
             return
 
+        if md5 in self._cloud_md5:
+            cloud_song_id = self._cloud_md5.get(md5) or None
+            stats.skipped_remote += 1
+            logger.info("云盘已有相同内容，跳过: %s -> songId=%s", audio.path, cloud_song_id)
+            if not self.dry_run:
+                self.state.mark_skipped(
+                    audio.path,
+                    status="skipped_remote",
+                    song_id=cloud_song_id,
+                )
+            self._notify(
+                "skip_remote",
+                {"path": str(audio.path), "song_id": cloud_song_id},
+            )
+            return
+
         if not self.dry_run:
             self.state.mark_uploading(audio.path)
 
@@ -363,6 +393,21 @@ class Syncer:
             stats.planned += 1
             logger.info("dry-run：待上传 %s", audio.path)
             self._notify("planned", {"path": str(audio.path)})
+            return
+
+        if result.reason == "linked":
+            stats.linked += 1
+            logger.info("补建云盘条目成功: %s -> songId=%s", audio.path, result.song_id)
+            if not self.dry_run:
+                self.state.mark_uploaded(
+                    audio.path,
+                    song_id=result.song_id,
+                    cloud_name=result.cloud_name,
+                )
+            self._notify(
+                "linked",
+                {"path": str(audio.path), "song_id": result.song_id},
+            )
             return
 
         stats.uploaded += 1

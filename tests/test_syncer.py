@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 import threading
 from pathlib import Path
 
@@ -13,9 +15,13 @@ from ncm_cloud_sync.syncer import Syncer
 
 
 class FakeClient:
-    def __init__(self, outcomes=None) -> None:
+    def __init__(self, outcomes=None, cloud=None) -> None:
         self.outcomes = outcomes or {}
+        self.cloud = cloud or {}
         self.calls: list[tuple[str, bool]] = []
+
+    def cloud_song_md5_map(self) -> dict[str, int]:
+        return dict(self.cloud)
 
     def upload(self, path, *, md5=None, dry_run=False):
         self.calls.append((Path(path).name, dry_run))
@@ -100,6 +106,37 @@ def test_skipped_remote_record_is_rechecked(tmp_path: Path) -> None:
         stats = Syncer(config, second, state).run_once()
         assert stats.uploaded == 1
         assert len(second.calls) == 1
+
+
+def test_cloud_reconciliation_skips_before_upload(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    md5 = hashlib.md5(b"a").hexdigest()
+    config = make_config(tmp_path, music)
+    client = FakeClient(cloud={md5: 123})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.skipped_remote == 1
+        assert client.calls == []
+        record = state.get(music / "a.mp3")
+        assert record.status == "skipped_remote"
+        assert record.song_id == 123
+
+
+def test_linked_metadata_is_not_counted_as_upload(tmp_path: Path, caplog) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    client = FakeClient({"a.mp3": UploadResult(True, song_id=9, reason="linked")})
+    with StateStore(config.db_path) as state, caplog.at_level(logging.INFO):
+        stats = Syncer(config, client, state).run_once()
+        assert stats.linked == 1
+        assert stats.uploaded == 0
+        assert stats.bytes_uploaded == 0
+        assert "补建云盘条目成功" in caplog.text
+        assert state.get(music / "a.mp3").status == "uploaded"
 
 
 def test_failure_is_isolated(tmp_path: Path) -> None:

@@ -272,6 +272,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.21 起，命中 `exclude` / `exclude_dirs` 或小文件/扩展名过滤的状态记录会标记为 `ignored` 并从总数和问题列表隐藏；「关于」页只读检查 GitHub Release，通知（含钉钉）只观察同步结果，均不影响同步流程。
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
+- 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
 
 ## 14. 参考
 

@@ -242,7 +242,7 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
 
     result = client.upload(path, md5="abc")
     assert result.uploaded is True
-    assert result.reason == "uploaded"
+    assert result.reason == "linked"
     assert result.song_id == 7
     assert captured["song_id"] == 7
     assert captured["resource_id"] == 0
@@ -252,6 +252,19 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     assert captured["album"] == ""
     assert captured["artist"] == ""
     assert events == ["pub:7"]
+
+
+def test_cloud_song_md5_map_reads_private_cloud() -> None:
+    client = make_client()
+    client._weapi = lambda *a, **k: {  # type: ignore[method-assign]
+        "count": 2,
+        "data": [
+            {"privateCloud": {"md5": "AAA", "songId": 12}},
+            {"md5": "bbb", "songId": 34},
+        ],
+    }
+    assert client.cloud_song_md5_map() == {"aaa": 12, "bbb": 34}
+    assert client.cloud_md5_set() == {"aaa", "bbb"}
 
 
 def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:

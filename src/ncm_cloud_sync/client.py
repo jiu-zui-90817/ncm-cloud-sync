@@ -587,12 +587,27 @@ class CloudClient:
                 break
         return songs
 
+    def cloud_song_md5_map(self) -> dict[str, int]:
+        """云盘已有内容：md5 -> songId，用于同步前对账。
+
+        云盘列表的 md5/songId 既可能在顶层，也可能在 privateCloud 子对象里。
+        只取顶层会得到空集合，导致本地明明已在云盘仍反复走 info/v2。
+        """
+        mapping: dict[str, int] = {}
+        for song in self.cloud_songs():
+            private = song.get("privateCloud")
+            detail = private if isinstance(private, dict) else song
+            md5 = str(detail.get("md5") or song.get("md5") or "").strip().lower()
+            if not md5:
+                continue
+            song_id = _as_int(
+                detail.get("songId") or song.get("songId") or 0, 0
+            )
+            mapping.setdefault(md5, song_id)
+        return mapping
+
     def cloud_md5_set(self) -> set[str]:
-        return {
-            str(song.get("md5", "")).lower()
-            for song in self.cloud_songs()
-            if song.get("md5")
-        }
+        return set(self.cloud_song_md5_map())
 
     # -- 上传流程 ---------------------------------------------------------
     def check_upload(self, md5: str, size: int, ext: str) -> dict[str, Any]:
@@ -898,4 +913,7 @@ class CloudClient:
             object_key=object_key,
         )
         self.publish(song_id)
-        return UploadResult(True, song_id=song_id, reason="uploaded", cloud_name=name)
+        # needUpload=false 时没有上传字节，只是补建了云盘条目，不能算作
+        # “上传成功”，否则统计和用户看到的云端数量会对不上。
+        reason = "uploaded" if token else "linked"
+        return UploadResult(True, song_id=song_id, reason=reason, cloud_name=name)

@@ -14,7 +14,7 @@
 
 ### 2. 获取 `.fpk`
 
-从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.0.fpk`）。
+从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.1.fpk`）。
 
 自行构建：
 
@@ -50,7 +50,7 @@ bash scripts/build-fnos.sh
 0.3.0 改了应用标识、包用户、数据目录和 Python 包名，应用中心不会把它当成 0.2.x 的升级。旧版本可以继续保留，确认新版本可用后再卸载。
 
 1. 停止旧应用，备份 `/var/apps/wy-music-cloud/var`；
-2. 安装 `ncm-cloud-sync-0.3.0.fpk`，启动一次让新数据目录生成，然后停止；
+2. 安装 `ncm-cloud-sync-0.3.1.fpk`，启动一次让新数据目录生成，然后停止；
 3. 把旧目录里的 `settings.json` 和 `data/` 复制到 `/var/apps/ncm-cloud-sync/var/`，确认属主是新的应用用户 `ncm-cloud-sync`；
 4. 启动新应用，检查账号、音乐目录、排除目录和通知配置；登录态失效时重新扫码；
 5. 确认同步正常后再卸载旧应用，卸载前不要删除旧数据目录。
@@ -101,9 +101,10 @@ Web UI 设置项：
 - **日志级别**：DEBUG / INFO / WARNING / ERROR；
 - **通知**：在「通知」页添加渠道、启用/停用、发送测试，并按成功 / 失败 / 始终发送；支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉机器人、Server酱、PushPlus、Pushover、PushDeer、Webhook、SMTP；
 - **钉钉机器人安全设置**：支持加签（`secret`）和自定义关键词（`keyword`，多个用逗号分隔；消息不含关键词时程序会自动补第一个）。IP 地址段白名单只能在钉钉机器人安全设置里填 NAS 的出口公网 IP，程序无法代填；同时启用加签、关键词和 IP 白名单时，三项都要满足。
+- **云盘对账**：每轮开始读取云盘列表（`privateCloud.md5`），MD5 已在云盘的直接跳过；`needUpload=false` 的补建单独显示为“补建”，不计入上传数和字节数；
 - **演练模式**：开启后自动同步也只检查不上传。
 
-保存后对下一轮同步生效。日志卡片显示最近日志；更多历史在数据目录的 `app.log`。通知失败只记日志，不会中断同步；`settings.json` 里的通知 token 为敏感信息，请勿分享。
+保存后对下一轮同步生效。日志卡片显示最近日志；更多历史在数据目录的 `app.log`，进程 stdout/stderr 在 `app.out`（0.3.1 起分开，避免每条日志重复两次）。通知失败只记日志，不会中断同步；`settings.json` 里的通知 token 为敏感信息，请勿分享。
 
 ### 8. 数据目录
 
@@ -113,6 +114,7 @@ Web UI 设置项：
 /var/apps/ncm-cloud-sync/var/
 ├── settings.json
 ├── app.log
+├── app.out
 ├── app.pid
 ├── login.txt
 └── data/
@@ -127,7 +129,8 @@ Web UI 设置项：
 - `settings.json`：音乐目录、排除目录、自动同步、通知配置、同步间隔、请求间隔、日志级别；
 - `data/state.db`：SQLite 同步状态，去重核心；
 - `data/session.json`：登录态，敏感；
-- `app.log`：运行日志。
+- `app.log`：Python 日志 handler 写入的运行日志；
+- `app.out`：进程 stdout/stderr（0.3.1 起与 `app.log` 分开）。
 
 ### 9. 升级
 
@@ -190,19 +193,27 @@ sudo rm -rf /var/apps/ncm-cloud-sync/var
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.0**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带 `deviceId`、PC 版本号和完整设备请求头；二维码内容仍只带 `codekey`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.1**，停止并重新启动应用，刷新页面后重新生成二维码。若仍失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”反馈；同时可用“扫码失败？改用 Cookie 登录”，从已登录的 music.163.com 复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **没有日志文件 / 日志是空的**
 
 0.2.4 起服务端带内存日志缓冲。登录前可以在登录卡片展开“查看诊断 / 日志（登录失败时先看这里）”，登录后也可以在同步控制里点“复制诊断”，或在页面底部日志卡片点“诊断信息 / 复制诊断”。它会列出真实的 `app.log` 路径、文件是否存在、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使 `app.log` 因权限没写成，也能看到内存日志。反馈问题时点“复制诊断”即可。
 
+**云盘数量没有增加 / 日志显示上传成功但云盘里没有**
+
+0.3.0 及更早版本把 `needUpload=false` 的“补建条目”也计入 uploaded，日志看起来一直在上传，实际没有新增字节。0.3.1 起同步前先读取云盘列表并按 `privateCloud.md5` 对账，已有内容直接跳过；补建单独显示为“补建 N”，不再算上传。升级后停止再启动，先跑演练看“待上传 / 跳过 / 补建”，再跑真实同步。
+
+**日志每条都重复两次**
+
+0.3.0 及更早版本 stdout 和 RotatingFileHandler 同时写 `app.log`。0.3.1 起 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写。旧日志里的重复行不会消失，新日志正常。
+
 **同步失败 / 上传时提示 [400] 参数错误**
 
-日志会记录具体文件与错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.3.0，停止再启动应用后重试。页面底部日志卡片点“诊断信息”，会显示真实的 `app.log` 路径、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使日志文件因权限没写成，内置日志缓冲仍可查看。其他常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
+日志会记录具体文件与错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.3.1，停止再启动应用后重试。页面底部日志卡片点“诊断信息”，会显示真实的 `app.log` 路径、数据目录、Python、PID、Socket、`TRIM_*` 环境变量和最近 120 行日志；即使日志文件因权限没写成，内置日志缓冲仍可查看。其他常见原因：网络、Cookie、云盘容量、单文件限制、接口变动。失败文件会保留状态，修好后可重试。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.3.0，停止再启动应用后重试；若仍失败，复制诊断信息，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U。
+0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.3.1，停止再启动应用后重试；若仍失败，复制诊断信息，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 

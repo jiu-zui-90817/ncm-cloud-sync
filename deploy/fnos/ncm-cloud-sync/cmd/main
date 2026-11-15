@@ -9,6 +9,7 @@ DATA_DIR="$VAR_DIR/data"
 SOCKET="$APP_DIR/app.sock"
 PID="$VAR_DIR/app.pid"
 LOG="$VAR_DIR/app.log"
+OUT="$VAR_DIR/app.out"
 
 export NCM_CLOUD_SYNC_DATA_DIR="$DATA_DIR"
 export NCM_CLOUD_SYNC_SETTINGS="$VAR_DIR/settings.json"
@@ -41,8 +42,10 @@ start_app() {
 
   export PYTHONPATH="$APP_DIR/server:$vendor${PYTHONPATH:+:$PYTHONPATH}"
   cd "$APP_DIR"
-  printf "\n[%s] 启动 Web 服务\n" "$(date "+%Y-%m-%d %H:%M:%S")" >>"$LOG"
-  nohup "$python" -m ncm_cloud_sync.web >>"$LOG" 2>&1 &
+  printf "\n[%s] 启动 Web 服务\n" "$(date "+%Y-%m-%d %H:%M:%S")" >>"$OUT"
+  # Python 自己会写 app.log；这里只把进程 stdout/stderr 落到 app.out，
+  # 否则同一条日志会被重定向和 RotatingFileHandler 各写一次。
+  nohup "$python" -m ncm_cloud_sync.web >>"$OUT" 2>&1 &
   printf "%s\n" "$!" >"$PID"
 
   local i pid
