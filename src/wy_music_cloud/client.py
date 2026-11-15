@@ -56,6 +56,10 @@ AUTH_ERROR_CODES = {301, 302}
 ANON_APPVER = "3.1.17.204416"
 ANON_OSVER = "Microsoft-Windows-10-Professional-build-19045-64bit"
 EAPI_PC_URL = "https://interfacepc.music.163.com"
+EAPI_UPLOAD_URL = "http://musicupload.netease.com"
+EAPI_PUB_URL = "https://interface.music.163.com"
+WHALE_ALLOC_URL = "http://musicupload.netease.com/api/whale/token/alloc"
+WHALE_CHANNEL = 3
 EAPI_PC_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 "
@@ -343,13 +347,15 @@ class CloudClient:
         payload: dict[str, Any],
         *,
         check: bool = True,
+        base_url: str = EAPI_PC_URL,
     ) -> dict[str, Any]:
         """用 PC 客户端 eapi 调用云盘写入接口。
 
-        2026-11 起 /api/upload/cloud/info/v2 与 /api/cloud/pub/v2 走
-        weapi 会返回 [400] 接口调用失败；当前可用的 SPlayer-Next 使用
-        interfacepc.music.163.com 的 eapi，PC appver 3.1.29.205117，
-        并在 header 与 Cookie 中带上 NMTID。
+        2026-11 起云盘写入必须走 eapi。查重、pub/v2 使用
+        interfacepc/interface.music.163.com；info/v2 必须使用上传域名
+        musicupload.netease.com，并且 Cookie 要带完整登录 Cookie。
+        另参考 HyPlayer：info 的 resourceId/songid 传字符串、bitrate 传
+        整数，字节已上传时还要带 objectKey={bucket}/{objectKey}。
         """
         device_id = self._ensure_anonymous_device()
         now_ms = int(time.time() * 1000)
@@ -370,22 +376,15 @@ class CloudClient:
             value = self.cookies.get(name)
             if value:
                 header[name] = str(value)
-        # eapi 的 NMTID 与 MUSIC_U 一样要同时出现在请求体 header 和
-        # Cookie 里；0.2.14 漏了它，服务端仍会回 400。
-        nmtid = self.cookies.get("NMTID")
-        if nmtid:
-            header["NMTID"] = str(nmtid)
         body = dict(payload)
         body["e_r"] = False
         body["header"] = header
         form = encrypt_eapi(uri, body)
-        cookie = "; ".join(
-            f"{quote(str(key), safe='')}={quote(str(value), safe='')}"
-            for key, value in header.items()
-        )
+        # 完整登录 Cookie 才是 eapi 的鉴权来源；body.header 只放设备字段。
+        cookie = cookie_header(self.cookies)
         lines: list[str] = []
         result = self._post_json(
-            EAPI_PC_URL + "/eapi/" + uri[len("/api/"):],
+            base_url + "/eapi/" + uri[len("/api/"):],
             form,
             headers={
                 "User-Agent": EAPI_IPHONE_USER_AGENT,
@@ -559,6 +558,41 @@ class CloudClient:
             "raw": body,
         }
 
+    def whale_alloc(self, md5: str, filename: str) -> dict[str, Any]:
+        """申请新版鲸鱼上传 token（HyPlayer 的 musicupload 流程）。
+
+        老 /weapi/nos/token/alloc 返回的 resourceId 在 info/v2 已不被接受；
+        新版必须先拿鲸鱼 token，上传字节后再把同一个 resourceId 和
+        objectKey 提交给 musicupload 的 info/v2。
+        """
+        biz_key = f"{secrets.randbelow(61439) + 4096:x}{secrets.randbelow(65535):x}"
+        payload = {
+            "channel": str(WHALE_CHANNEL),
+            "filename": filename,
+            "md5": md5,
+            "type": "audio",
+            "bucket": NOS_BUCKET,
+            "bizKey": biz_key,
+        }
+        body = self._post_json(
+            WHALE_ALLOC_URL,
+            payload,
+            check=False,
+        )
+        code = _as_int(body.get("code"), -1)
+        if code not in (200, -1):
+            message = body.get("message") or body.get("msg") or body
+            raise UploadError(f"鲸鱼上传 token 申请失败: code={code} {message}")
+        result = body.get("data")
+        if not isinstance(result, dict):
+            result = body.get("result")
+        if not isinstance(result, dict):
+            raise UploadError(f"鲸鱼上传 token 响应异常: {body}")
+        for key in ("objectKey", "token", "resourceId"):
+            if not result.get(key):
+                raise UploadError(f"鲸鱼上传 token 缺少 {key}: {body}")
+        return result
+
     def alloc_token(
         self,
         md5: str,
@@ -674,35 +708,39 @@ class CloudClient:
         album: str,
         artist: str,
         resource_id: int | str,
-        bitrate: str = "999000",
+        object_key: str | None = None,
+        bitrate: int | str = 999000,
     ) -> int:
         payload: dict[str, Any] = {
-            "md5": md5,
-            "filename": filename,
-            "song": song,
             "album": album,
             "artist": artist,
-            "bitrate": bitrate,
-            # SPlayer-Next 把 resourceId 作为 JSON 数字提交；0.2.14 转成
-            # 字符串后 info/v2 仍然 400。
-            "resourceId": _as_int(resource_id, 0),
+            "bitrate": _as_int(bitrate, 999000),
+            "filename": filename,
+            "md5": md5,
+            "resourceId": str(resource_id),
+            "song": song,
+            # HyPlayer / ncm 都把 songid 作为字符串提交，0 也提交。
+            "songid": str(song_id) if song_id is not None else "0",
         }
-        # SPlayer-Next 把查重接口返回的 songId 原样作为数字提交，0 也提交；
-        # 只有响应里完全没有 songId 时才省略。
-        if song_id is not None:
-            payload["songid"] = int(song_id)
+        if object_key:
+            # 新流程要求 objectKey 为 {bucket}/{objectKey}，且与鲸鱼 token 对应。
+            payload["objectKey"] = object_key
         logger.debug("提交云盘信息: %s", payload)
         try:
-            body = self._eapi_api("/api/upload/cloud/info/v2", payload)
+            body = self._eapi_api(
+                "/api/upload/cloud/info/v2",
+                payload,
+                base_url=EAPI_UPLOAD_URL,
+            )
         except ApiError as exc:
             logger.error(
-                "提交云盘信息失败: filename=%r songid=%r resourceId=%r host=%s appver=%s nmtid=%s error=%s",
+                "提交云盘信息失败: filename=%r songid=%r resourceId=%r host=%s appver=%s cookie=%s error=%s",
                 filename,
                 payload.get("songid"),
                 payload.get("resourceId"),
-                EAPI_PC_URL,
+                EAPI_UPLOAD_URL,
                 EAPI_CLOUD_APPVER,
-                "yes" if self.cookies.get("NMTID") else "no",
+                "yes" if self.cookies.get("MUSIC_U") else "no",
                 exc,
             )
             raise
@@ -712,11 +750,11 @@ class CloudClient:
         return new_id
 
     def publish(self, song_id: int) -> None:
-        # pub/v2 与 info/v2 同属新版写入接口，必须一起走 eapi；
-        # songid 与 info 返回保持一致，用 JSON 数字。
+        # pub/v2 仍走 interface eapi，songid 用字符串。
         self._eapi_api(
             "/api/cloud/pub/v2",
-            {"songid": int(song_id)},
+            {"songid": str(song_id)},
+            base_url=EAPI_PUB_URL,
         )
 
     def upload(
@@ -746,10 +784,18 @@ class CloudClient:
 
         tags = read_tags(path)
         name = sanitize_filename(tags.get("title") or path.stem)
-        # 云盘上传只申请一个 NOS 桶 token：resourceId 必须来自这个实际上传的
-        # token。另申请空桶 token 再用它的 resourceId 提交 info/v2 会得到
-        # [400] 接口调用失败（0.2.12 及更早版本的错误）。
-        token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
+        # 新版流程先申请鲸鱼 token，再上传字节并用同一个 token 的
+        # resourceId + objectKey 提交 info/v2。老 NOS token 仅作兼容回退。
+        try:
+            token = self.whale_alloc(md5, path.name)
+            logger.info(
+                "鲸鱼上传 token: resourceId=%s objectKey=%s",
+                token.get("resourceId"),
+                token.get("objectKey"),
+            )
+        except (ApiError, UploadError) as exc:
+            logger.warning("鲸鱼上传 token 申请失败，回退到旧 NOS token: %s", exc)
+            token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
         if check["need_upload"]:
             self.upload_to_nos(token, path, md5, ext)
         else:
@@ -757,6 +803,9 @@ class CloudClient:
             # 云盘条目仍需 info/v2 + pub/v2 才会出现在云盘列表；
             # 这里复用同一个 token 的 resourceId 补建条目。
             logger.info("文件内容已在网易云对象存储，补建云盘条目: %s", path)
+        object_key = None
+        if token.get("objectKey"):
+            object_key = f"{NOS_BUCKET}/{token['objectKey']}"
         song_id = self.finish_upload(
             md5=md5,
             song_id=check["song_id"],
@@ -765,6 +814,7 @@ class CloudClient:
             album=display_album(tags),
             artist=display_artist(tags),
             resource_id=token.get("resourceId", 0),
+            object_key=object_key,
         )
         self.publish(song_id)
         return UploadResult(True, song_id=song_id, reason="uploaded", cloud_name=name)

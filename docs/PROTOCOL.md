@@ -70,18 +70,26 @@ weapi 请求的 URL 必须使用 `/weapi/...`。NCMApi 在发送前会把代码�
 
 ## 3.2 eapi 云盘写入
 
-2026-11 起，`/api/upload/cloud/info/v2` 和 `/api/cloud/pub/v2` 通过 weapi 调用会返回 `[400] 接口调用失败`，必须改用 eapi：
+2026-11 起，`/api/upload/cloud/info/v2` 和 `/api/cloud/pub/v2` 通过 weapi 调用会返回 `[400] 接口调用失败`，必须改用 eapi。不同接口的 eapi 域名不同：
 
-```http
-POST https://interfacepc.music.163.com/eapi/upload/cloud/info/v2
-Content-Type: application/x-www-form-urlencoded
-User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
-Cookie: <header map 的 URL 编码 k=v 对>
-
-params=<AES-128-ECB 十六进制大写>
+```text
+check        https://interfacepc.music.163.com/eapi/cloud/upload/check
+info/v2      http://musicupload.netease.com/eapi/upload/cloud/info/v2
+pub/v2       https://interface.music.163.com/eapi/cloud/pub/v2
+whale token  http://musicupload.netease.com/api/whale/token/alloc  （普通 form，不是 eapi）
 ```
 
-加密前的 JSON 是业务字段加上 `header` 和 `e_r=false`。`header` 至少包含 `osver`、`deviceId`（52 位大写 hex）、`os`、`appver`、`versioncode`、`mobilename`、`buildver`、`resolution`、`__csrf`、`channel`、`requestId`，登录后还要带 `MUSIC_U`（有匿名 token 时带 `MUSIC_A`），并带上 `NMTID`。云盘写入使用 PC 身份：`appver=3.1.29.205117`、`osver=Microsoft-Windows-10-Professional-build-19045-64bit`，域名是 `interfacepc.music.163.com`。Cookie 头由同一份 `header` 按 `k=v` 做 URL 编码后拼接，不是直接复用登录 Cookie。0.2.14 漏了 `NMTID` 且用了 `interface.music.163.com`，info/v2 仍会返回 [400] 接口调用失败。0.2.16 起查重也走 eapi，服务端会在响应 `Set-Cookie` 中下发 `NMTID`，客户端吸收后再提交 info/v2 与 pub/v2；如果只走 weapi 查重，登录 Cookie 里又没有 `NMTID`，info/v2 仍可能 400。
+eapi 请求头：
+
+```http
+Content-Type: application/x-www-form-urlencoded
+User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
+Cookie: <完整登录 Cookie>
+```
+
+加密前的 JSON 是业务字段加上 `header` 和 `e_r=false`。`header` 至少包含 `osver`、`deviceId`（52 位大写 hex）、`os`、`appver`、`versioncode`、`mobilename`、`buildver`、`resolution`、`__csrf`、`channel`、`requestId`，登录后还要带 `MUSIC_U`（有匿名 token 时带 `MUSIC_A`）。PC 身份使用 `appver=3.1.29.205117`。
+
+关键：**Cookie 头必须是完整登录 Cookie**，不是只用 `header` 里那几个设备字段拼接。0.2.15/0.2.16 把 NMTID 同时塞进 header 和 Cookie，仍然 400；0.2.17 参考 HyPlayer，改为完整 Cookie。
 
 加密步骤：
 
@@ -93,7 +101,7 @@ plain     = uri + "-36cd479b6b5-" + text + "-36cd479b6b5-" + md5_text
 params    = AES-128-ECB(plain, "e82ckenh8dichen8") -> hex 大写
 ```
 
-请求 URL 是 `https://interfacepc.music.163.com/eapi/` 加上 `uri` 去掉 `/api/` 后的部分；加密和签名仍然使用完整的 `/api/...` uri。
+请求 URL 是各接口 eapi 域名加上 `/eapi/`，再接 `uri` 去掉 `/api/` 后的部分；加密和签名仍然使用完整的 `/api/...` uri。
 
 ## 4. 云盘列表
 
@@ -115,7 +123,7 @@ weapi 明文：
 POST https://interfacepc.music.163.com/eapi/cloud/upload/check
 Content-Type: application/x-www-form-urlencoded
 User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
-Cookie: <header map 的 URL 编码 k=v 对>
+Cookie: <完整登录 Cookie>
 
 params=<AES-128-ECB 十六进制大写>
 ```
@@ -126,7 +134,7 @@ eapi 明文（和 info/v2 一样带 `header`、`e_r=false`）：
 {"bitrate":"999000","ext":"","length":<文件字节数，数字>,"md5":"<32位小写md5>","songId":"0","version":1}
 ```
 
-0.2.16 起查重使用 eapi，服务端响应会带 `Set-Cookie: NMTID=...`。必须吸收这个 Cookie，后续 info/v2 和 pub/v2 的 `header` 与 Cookie 都要带上同一个 `NMTID`；否则 info/v2 会返回 `[400] 接口调用失败`。
+0.2.16 起查重使用 eapi，响应可能带 `Set-Cookie: NMTID=...`。客户端会吸收它并放进完整 Cookie。0.2.17 已确认 info/v2 的 400 不是单纯缺 `NMTID` 导致，写入链路和 resourceId/objectKey 必须一起换。
 
 返回重点：
 
@@ -134,21 +142,31 @@ eapi 明文（和 info/v2 一样带 `header`、`e_r=false`）：
 - `body.songId`：云端已有歌曲 ID，后续 finalize 会用到；
 - `body.needUpload == true`：申请上传 token 并上传文件字节。
 
-## 6. 申请上传 token（单个 NOS 桶 token）
+## 6. 申请鲸鱼上传 token（新版主流程）
+
+```http
+POST http://musicupload.netease.com/api/whale/token/alloc
+Content-Type: application/x-www-form-urlencoded
+Cookie: <完整登录 Cookie>
+
+channel=3&filename=<真实文件名，含扩展名>&md5=<md5>&type=audio&bucket=jd-musicrep-privatecloud-audio-public&bizKey=<随机 hex>
+```
+
+返回 `data.bucket`、`data.objectKey`、`data.token`、`data.resourceId`、`data.endpoint` 等字段。`resourceId` 在新版接口里是字符串。
+
+这个 token 必须同时用于三处：上传字节用 `data.token` + `data.objectKey`；info/v2 的 `resourceId` 用同一个 `data.resourceId`；info/v2 的 `objectKey` 用 `{bucket}/{data.objectKey}`。不要再用老 `/weapi/nos/token/alloc` 的 `result.resourceId` 去提交 info/v2，这是 0.2.13-0.2.16 一直 400 的关键原因。
+
+老接口只作为鲸鱼 token 申请失败时的回退：
 
 ```http
 POST https://music.163.com/weapi/nos/token/alloc
 ```
 
-weapi 明文：
-
 ```json
 {"bucket":"jd-musicrep-privatecloud-audio-public","ext":"<实际扩展名>","filename":"<清洗后的文件名>","local":false,"nos_product":3,"type":"audio","md5":"<md5>"}
 ```
 
-文件名清洗：去掉扩展名、去掉空白、把 `.` 换成 `_`。
-
-返回 `result.resourceId`、`result.objectKey` 和 `result.token`。三者必须来自同一个 token：上传字节用 `objectKey`/`token`，写入云盘信息用同一个 `result.resourceId`。不要先申请空桶 token 再用它的 `resourceId`，否则 info/v2 会返回 [400] 接口调用失败。
+回退分支返回 `result.resourceId`、`result.objectKey`、`result.token`，仍然只在这一个 token 内配对使用。
 
 ## 7. 获取 NOS 上传节点
 
@@ -172,6 +190,7 @@ GET https://wanproxy.127.net/lbs?version=1.0&bucketname=jd-musicrep-privatecloud
 POST http://<host>/<bucket>/<objectKey>
 ```
 
+- `objectKey` 来自第 6 步的鲸鱼 token（或回退 token）；
 - `objectKey` 中的 `/` 要转成 `%2F`；
 - Query：`offset=0&complete=true&version=1.0`；
 - Header `x-nos-token: <token>`；
@@ -179,34 +198,46 @@ POST http://<host>/<bucket>/<objectKey>
 - Header `Content-Type: audio/mpeg`（按实际格式可调整）；
 - Body 是文件原始字节，`Content-Length` 必须准确。
 
-## 9. 写入云盘信息（eapi）
+本项目当前按整文件一次 POST；大文件分片可参考 HyPlayer 的 1 MiB 分片和 `context` 续传，但不是 0.2.17 的必要条件。
+
+## 9. 写入云盘信息（eapi，musicupload 域名）
 
 ```http
-POST https://interfacepc.music.163.com/eapi/upload/cloud/info/v2
+POST http://musicupload.netease.com/eapi/upload/cloud/info/v2
+Content-Type: application/x-www-form-urlencoded
+User-Agent: NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)
+Cookie: <完整登录 Cookie>
+
+params=<AES-128-ECB 十六进制大写>
 ```
 
 eapi 业务明文（加密前还会加上 `header` 和 `e_r=false`）：
 
 ```json
-{"md5":"<md5>","songid":<check 返回的 songId 数字>,"filename":"<真实文件名，含扩展名>","song":"<标题>","album":"<专辑>","artist":"<艺术家>","bitrate":"999000","resourceId":<同一个 NOS token 的 resourceId 数字>}
+{"album":"<专辑>","artist":"<艺术家>","bitrate":999000,"filename":"<真实文件名，含扩展名>","md5":"<md5>","objectKey":"jd-musicrep-privatecloud-audio-public/<objectKey>","resourceId":"<鲸鱼 token 的 resourceId 字符串>","song":"<标题>","songid":"<check 返回的 songId，字符串>","e_r":false,"header":{...}}
 ```
 
-字段要求：`songid` 用 check 返回的 `songId`，按 JSON 数字提交，返回 0 时提交 `0`，只有响应里完全没有 `songId` 时才省略；`resourceId` 必须是来自第 6 步实际用于上传的那个 NOS token 的 `resourceId`，按 JSON 数字提交，空桶 token 或字符串都可能返回 [400] 接口调用失败；`filename` 用真实文件名（含扩展名），`song` 用标题。不要发送 `objectKey`，否则会返回 `{"msg":"rep create failed","code":404}`。
+字段要求：
 
-标签缺失时回退：`song` 用文件名，`album` 用“未知专辑”，`artist` 用“未知艺术家”。
+- `resourceId`：必须来自第 6 步实际用于上传的鲸鱼 token，字符串；老 NOS token 的 resourceId 不行。
+- `objectKey`：必须是 `{bucket}/{objectKey}`，与鲸鱼 token 对应；**新版必须发送**，不要再按 0.2.13 的旧笔记省略。
+- `filename`：真实文件名（含扩展名）；`song`：标题。
+- `songid`：check 返回的 `songId` 转字符串，返回 0 时提交 `"0"`。
+- `bitrate`：整数。
+- `album` / `artist` 缺失时回退“未知专辑”/“未知艺术家”。
 
-返回新的 `songId`。
+返回新的 `songId`（字符串或数字）。
 
 ## 10. 发布到云盘（eapi）
 
 ```http
-POST https://interfacepc.music.163.com/eapi/cloud/pub/v2
+POST https://interface.music.163.com/eapi/cloud/pub/v2
 ```
 
 eapi 业务明文（同样带 `header`、`e_r=false` 并加密）：
 
 ```json
-{"songid":<info v2 返回的 songId 数字>}
+{"songid":"<info v2 返回的 songId，字符串>"}
 ```
 
 成功后可在云盘列表看到。
@@ -214,14 +245,16 @@ eapi 业务明文（同样带 `header`、`e_r=false` 并加密）：
 ## 11. 完整顺序
 
 ```text
-check(eapi, md5,size)                      -> needUpload/songId + Set-Cookie NMTID
-  ├─ needUpload=false：跳过字节上传，但仍要走完下面的补建流程
-  └─ token/alloc bucket=jd-musicrep-...   -> resourceId, objectKey, token
-       ├─ GET lbs                              -> host
-       ├─ needUpload=true: POST NOS (文件字节) -> 上传完成
-       ├─ info/v2 (eapi, md5,songid,resourceId) -> songId
-       └─ pub/v2 (eapi, songid)                -> 发布
+check(eapi, md5,size)                         -> needUpload/songId
+  ├─ needUpload=false：跳过字节上传，但仍要走完 info/v2 + pub/v2 补建
+  └─ whale token alloc (musicupload)          -> resourceId, objectKey, token
+       ├─ GET lbs                             -> NOS host
+       ├─ needUpload=true: POST NOS (bytes)   -> 上传完成
+       ├─ info/v2 (musicupload eapi, md5,songid,resourceId,objectKey) -> songId
+       └─ pub/v2 (interface eapi, songid)     -> 发布
 ```
+
+鲸鱼 token 申请失败时才回退到老 `/weapi/nos/token/alloc`，后续仍然用这个回退 token 的 `resourceId`/`objectKey` 走 info/v2。
 
 ## 12. 常见错误
 
@@ -229,7 +262,7 @@ check(eapi, md5,size)                      -> needUpload/songId + Set-Cookie NMT
 | --- | --- |
 | `code=301/302` | Cookie 失效、未登录、风控 |
 | `code=400` / `[400] 参数错误` | 参数不合法，或把 weapi 加密表单发到了 `/api/...` 而不是 `/weapi/...`（不是登录问题） |
-| `info/v2` 返回 `[400] 接口调用失败` | 云盘写入仍走 weapi；2026-11 起必须改用 `interfacepc.music.163.com` 的 eapi，PC appver `3.1.29.205117`，header/Cookie 带 `NMTID`，`resourceId`、`songid` 用 JSON 数字。0.2.16 起查重也必须走 eapi 以取得 `NMTID`，不能只靠登录 Cookie |
+| `info/v2` 返回 `[400] 接口调用失败` | 写入链路不对：info/v2 必须用 `musicupload.netease.com` 的 eapi + 完整 Cookie，`resourceId`/`objectKey` 必须来自同一个鲸鱼 token；老 NOS token、interfacepc 域名、缺 objectKey 或错误的 id 类型都会 400。0.2.17 已按此修复 |
 | `code=405` | 操作频繁，被限流；应停止本轮并等待冷却，不能按文件重试刷请求 |
 | `code=429` | 请求过多，与 405 同类，按限流处理 |
 | NOS 403 / token 无效 | token 过期、objectKey 路径不对、Content-MD5 不匹配 |
@@ -239,6 +272,7 @@ check(eapi, md5,size)                      -> needUpload/songId + Set-Cookie NMT
 ## 13. 稳定性建议
 
 - 所有请求设置超时；网络错误和 5xx 才重试，4xx 不盲目重试；
+- 鲸鱼 token 的 `resourceId`、`objectKey`、`token` 必须成组使用，不要跨 token 混用；
 - token 分配和 NOS 上传之间不要长时间停顿；
 - 上传前先 `check`，这是最便宜、最有效的去重；
 - 把协议封装在一个 client 模块里，接口变化时只改一处；
@@ -250,5 +284,7 @@ check(eapi, md5,size)                      -> needUpload/songId + Set-Cookie NMT
 - [Binaryify/NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi)
 - [lulu-ls/cloud-uploader](https://github.com/lulu-ls/cloud-uploader)
 - [Binaryify/NeteaseCloudMusicApi#1851](https://github.com/Binaryify/NeteaseCloudMusicApi/pull/1851)
-- [SPlayer-Dev/ncm-api-rs](https://github.com/SPlayer-Dev/ncm-api-rs)：eapi 云盘写入、header/Cookie 构造的当前参考
-- [SPlayer-Dev/SPlayer-Next](https://github.com/SPlayer-Dev/SPlayer-Next)：单个 NOS token 的完整上传顺序
+- [SPlayer-Dev/ncm-api-rs](https://github.com/SPlayer-Dev/ncm-api-rs)：eapi 加密、header 构造参考
+- [SPlayer-Dev/SPlayer-Next](https://github.com/SPlayer-Dev/SPlayer-Next)：eapi 云盘写入参考
+- [HyPlayer/HyPlayer.NeteaseProvider](https://github.com/HyPlayer/HyPlayer.NeteaseProvider)：鲸鱼 token + musicupload info/v2 + objectKey 的当前参考
+- [magic-akari/ncm_api](https://github.com/magic-akari/ncm_api)：musicupload info/v2 的另一份实现

@@ -72,6 +72,45 @@ def test_check_upload_bootstraps_nmtid_for_cloud_info() -> None:
     assert "NMTID=from-check" in captured[1].headers.get("cookie", "")
 
 
+def test_whale_alloc_payload() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["cookie"] = request.headers.get("cookie", "")
+        captured["method"] = request.method
+        captured["form"] = parse_qs(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={
+                "code": 200,
+                "data": {
+                    "objectKey": "obj/key",
+                    "token": "nos-token",
+                    "resourceId": "84294414064",
+                },
+            },
+        )
+
+    client = CloudClient(
+        {"MUSIC_U": "music-u", "__csrf": "csrf"},
+        transport=httpx.MockTransport(handler),
+        retries=0,
+        rate_limit=0,
+    )
+    token = client.whale_alloc("abc", "A - B.mp3")
+    assert token["resourceId"] == "84294414064"
+    assert captured["url"] == "http://musicupload.netease.com/api/whale/token/alloc"
+    assert captured["method"] == "POST"
+    assert "MUSIC_U=music-u" in captured["cookie"]
+    assert captured["form"]["channel"] == ["3"]
+    assert captured["form"]["filename"] == ["A - B.mp3"]
+    assert captured["form"]["md5"] == ["abc"]
+    assert captured["form"]["type"] == ["audio"]
+    assert captured["form"]["bucket"] == [NOS_BUCKET]
+    assert captured["form"]["bizKey"][0]
+
+
 def test_alloc_token_sanitizes_name() -> None:
     client = make_client()
     captured = {}
@@ -114,6 +153,7 @@ def test_finish_upload_matches_official_payload() -> None:
 
     def fake_eapi(path, payload=None, **kwargs):
         assert path == "/api/upload/cloud/info/v2"
+        assert kwargs["base_url"] == client_module.EAPI_UPLOAD_URL
         captured.update(payload)
         return {"code": 200, "songId": "123", "songIdLong": 123}
 
@@ -126,11 +166,13 @@ def test_finish_upload_matches_official_payload() -> None:
         album="未知专辑",
         artist="A",
         resource_id=36656729598,
+        object_key="jd-musicrep-privatecloud-audio-public/obj/key",
     )
     assert new_id == 123
-    assert captured["resourceId"] == 36656729598
-    assert isinstance(captured["resourceId"], int)
-    assert "songid" not in captured
+    assert captured["resourceId"] == "36656729598"
+    assert captured["songid"] == "0"
+    assert captured["bitrate"] == 999000
+    assert captured["objectKey"] == "jd-musicrep-privatecloud-audio-public/obj/key"
     assert captured["filename"] == "A - B.mp3"
     assert captured["song"] == "B"
 
@@ -154,8 +196,8 @@ def test_finish_upload_string_song_id_and_resource_id() -> None:
         resource_id="42",
     )
     assert new_id == 7
-    assert captured["songid"] == 7
-    assert captured["resourceId"] == 42
+    assert captured["songid"] == "7"
+    assert captured["resourceId"] == "42"
 
 
 def test_finish_upload_submits_zero_song_id() -> None:
@@ -177,7 +219,7 @@ def test_finish_upload_submits_zero_song_id() -> None:
         resource_id=1,
     )
     assert new_id == 5
-    assert captured["songid"] == 0
+    assert captured["songid"] == "0"
 
 
 def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -188,12 +230,12 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     events: list[str] = []
     captured: dict = {}
 
-    def alloc(md5, name, ext, *, bucket=""):
-        assert bucket == NOS_BUCKET
-        events.append("alloc")
+    def whale(md5, filename):
+        assert filename == "whatever.mp3"
+        events.append("whale")
         return {"resourceId": 36656729598, "objectKey": "obj/key", "token": "nos-token"}
 
-    client.alloc_token = alloc  # type: ignore[method-assign]
+    client.whale_alloc = whale  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not upload bytes"))  # type: ignore[method-assign]
     client.finish_upload = lambda **k: (captured.update(k), 7)[1]  # type: ignore[method-assign]
     client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
@@ -205,9 +247,10 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     assert result.song_id == 7
     assert captured["song_id"] == 7
     assert captured["resource_id"] == 36656729598
+    assert captured["object_key"] == f"{NOS_BUCKET}/obj/key"
     assert captured["filename"] == "whatever.mp3"
     assert captured["song"] == "晴天"
-    assert events == ["alloc", "pub:7"]
+    assert events == ["whale", "pub:7"]
 
 
 def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
@@ -217,12 +260,12 @@ def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     events: list[str] = []
     client.check_upload = lambda *a, **k: (events.append("check"), {"need_upload": True, "song_id": 0})[1]  # type: ignore[method-assign]
 
-    def alloc(md5, name, ext, *, bucket=""):
-        assert bucket == NOS_BUCKET
-        events.append("alloc:" + bucket)
+    def whale(md5, filename):
+        assert filename == "song.mp3"
+        events.append("whale")
         return {"objectKey": "obj/key", "token": "nos-token", "resourceId": 36656729598}
 
-    client.alloc_token = alloc  # type: ignore[method-assign]
+    client.whale_alloc = whale  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: events.append("nos")  # type: ignore[method-assign]
     captured: dict = {}
     client.finish_upload = lambda **k: (events.append("info"), captured.update(k), 99)[2]  # type: ignore[method-assign]
@@ -233,8 +276,36 @@ def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     assert result.uploaded is True
     assert result.song_id == 99
     assert result.cloud_name == "晴天"
-    assert events == ["check", "alloc:" + NOS_BUCKET, "nos", "info", "pub:99"]
+    assert events == ["check", "whale", "nos", "info", "pub:99"]
     assert captured["resource_id"] == 36656729598
+    assert captured["object_key"] == f"{NOS_BUCKET}/obj/key"
+
+
+def test_upload_falls_back_to_old_token_when_whale_fails(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "song.mp3"
+    path.write_bytes(b"x")
+    client = make_client(rate_limit=0)
+    events: list[str] = []
+    client.check_upload = lambda *a, **k: {"need_upload": True, "song_id": 0}  # type: ignore[method-assign]
+
+    client.whale_alloc = lambda *a, **k: (_ for _ in ()).throw(client_module.UploadError("no whale"))  # type: ignore[method-assign]
+
+    def alloc(md5, name, ext, *, bucket=""):
+        assert bucket == NOS_BUCKET
+        events.append("alloc")
+        return {"objectKey": "obj", "token": "tok", "resourceId": 1}
+
+    client.alloc_token = alloc  # type: ignore[method-assign]
+    client.upload_to_nos = lambda *a, **k: events.append("nos")  # type: ignore[method-assign]
+    captured: dict = {}
+    client.finish_upload = lambda **k: (captured.update(k), 5)[1]  # type: ignore[method-assign]
+    client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
+    monkeypatch.setattr(client_module, "read_tags", lambda p: {"title": "晴天"})
+
+    result = client.upload(path, md5="abc")
+    assert result.song_id == 5
+    assert events == ["alloc", "nos", "pub:5"]
+    assert captured["resource_id"] == 1
 
 
 def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:
@@ -242,7 +313,7 @@ def test_upload_dry_run_does_not_alloc(tmp_path: Path) -> None:
     path.write_bytes(b"x")
     client = make_client()
     client.check_upload = lambda *a, **k: {"need_upload": True, "song_id": 0}  # type: ignore[method-assign]
-    client.alloc_token = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
+    client.whale_alloc = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
     result = client.upload(path, md5="abc", dry_run=True)
     assert result.uploaded is False
     assert result.reason == "dry_run"
@@ -312,10 +383,11 @@ def test_eapi_cloud_info_request_shape() -> None:
     )
     body = client._eapi_api(
         "/api/upload/cloud/info/v2",
-        {"md5": "abc", "resourceId": 42},
+        {"md5": "abc", "resourceId": "42"},
+        base_url=client_module.EAPI_UPLOAD_URL,
     )
     assert body["code"] == 200
-    assert captured["url"] == "https://interfacepc.music.163.com/eapi/upload/cloud/info/v2"
+    assert captured["url"] == "http://musicupload.netease.com/eapi/upload/cloud/info/v2"
     assert "NeteaseMusic 9.0.90" in captured["ua"]
     assert "MUSIC_U=music-u" in captured["cookie"]
     assert "NMTID=nmtid" in captured["cookie"]
@@ -329,9 +401,9 @@ def test_eapi_cloud_info_request_shape() -> None:
     assert payload["e_r"] is False
     assert payload["header"]["MUSIC_U"] == "music-u"
     assert payload["header"]["deviceId"]
-    assert payload["header"]["NMTID"] == "nmtid"
+    assert "NMTID" not in payload["header"]
     assert payload["header"]["appver"] == "3.1.29.205117"
-    assert payload["resourceId"] == 42
+    assert payload["resourceId"] == "42"
 
 
 def test_publish_uses_eapi() -> None:
@@ -341,12 +413,14 @@ def test_publish_uses_eapi() -> None:
     def fake_eapi(path, payload=None, **kwargs):
         captured["path"] = path
         captured["payload"] = payload
+        captured["kwargs"] = kwargs
         return {"code": 200}
 
     client._eapi_api = fake_eapi  # type: ignore[method-assign]
     client.publish(99)
     assert captured["path"] == "/api/cloud/pub/v2"
-    assert captured["payload"] == {"songid": 99}
+    assert captured["payload"] == {"songid": "99"}
+    assert captured["kwargs"]["base_url"] == client_module.EAPI_PUB_URL
 
 
 def test_cloud_songs_pagination() -> None:
