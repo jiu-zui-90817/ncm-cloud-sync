@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.14 起同步的 `up_to_date` 快速路径会校验记录中的 MD5 是否仍在云盘列表；不在时记录日志并走完整对账/上传流程，避免云盘条目被删除或替换后永久跳过。
 - 0.3.13 起 `missing_candidates(..., include_missing=True)` 会重新检查已标记 `missing` 的记录：若同一 MD5 出现在新路径，旧记录改为 `moved` 并计入 `stats.moved`，不再重复计入 `missing`；仅有移动的运行也会保留。
 - 0.3.12 起通知默认跳过空跑：`success` 事件在 `uploaded + linked == 0` 时不发送，配置新增 `notify_empty`（默认 false，环境变量 `NCM_CLOUD_SYNC_NOTIFY_EMPTY`）；失败、暂停、终止不受影响。DingTalk 未配置 `keyword` 时默认“网易云”，通知标题改为“网易云云盘任务…”。文件移动后旧记录状态改为 `moved`，新路径按 MD5 复用，不计入 `missing`。
 - 0.3.11 起新增 `GET /api/files?kind=uploaded|pending|missing|skipped&limit=`，返回 `{kind,total,items,counts}`；`items[]` 含 `path/name,size,status,kind,song_id,duplicate_of,last_error,updated_at`。若最近一条运行是 `mode=scan`，`kind=pending` 改用该 run 的 `to_upload` 明细，并返回 `source=scan,run_id,finished_at`，保证与 `pending_scan` 数量一致。`StateStore.finish_run(..., keep=False)` 会删除该 run 和 run_items；同步仅在有上传、补建、失败、缺失或待续时保留，仅扫描仅在有待上传、失败、云端独有或本地重复时保留。

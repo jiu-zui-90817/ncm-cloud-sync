@@ -48,10 +48,13 @@ class FakeClient:
     def upload(self, path, *, md5=None):
         self.calls.append(Path(path).name)
         outcome = self.outcomes.get(Path(path).name)
-        if outcome is None:
-            return UploadResult(True, song_id=len(self.calls))
         if isinstance(outcome, Exception):
             raise outcome
+        if md5:
+            # 模拟云盘在成功上传/补建/查重命中后出现的 MD5，供下一轮 up_to_date 判断。
+            self.cloud[str(md5).lower()] = len(self.calls)
+        if outcome is None:
+            return UploadResult(True, song_id=len(self.calls))
         return outcome
 
 
@@ -83,6 +86,27 @@ def test_upload_then_up_to_date(tmp_path: Path) -> None:
         assert len(client.calls) == 1
         # 第二次没有任何同步动作，不保留空的运行记录
         assert len(state.recent_runs(10)) == 1
+
+
+def test_up_to_date_rechecks_cloud_md5(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    md5 = hashlib.md5(b"a" * 100).hexdigest()
+    with StateStore(config.db_path) as state:
+        first = Syncer(config, client, state).run_once()
+        assert first.uploaded == 1
+        assert md5 in client.cloud
+
+        # 云盘里的条目被删掉/换掉后，本地记录仍然是 uploaded；
+        # 不能仅凭 size+mtime 走 up_to_date，否则永远不会重新上传。
+        client.cloud.clear()
+        second = Syncer(config, client, state).run_once()
+        assert second.uploaded == 1
+        assert second.up_to_date == 0
+        assert client.calls == ["a.mp3", "a.mp3"]
 
 
 def test_local_duplicate_skipped(tmp_path: Path) -> None:

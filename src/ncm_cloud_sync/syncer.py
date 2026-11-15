@@ -518,6 +518,7 @@ class Syncer:
 
     def _process(self, audio: AudioFile, stats: SyncStats) -> None:
         record = self.state.get(audio.path)
+        record_md5 = str(record.md5 or "").lower() if record is not None else ""
         if (
             not self.force
             and record is not None
@@ -525,8 +526,13 @@ class Syncer:
             and record.mtime_ns == audio.mtime_ns
             and record.status in {"uploaded", "skipped_local"}
         ):
-            stats.up_to_date += 1
-            return
+            # 本地记录说已上传，但云盘列表可能已经变过（删歌、换文件、重新上传）。
+            # 只有该 MD5 仍在云盘列表里时才能安全地跳过；否则必须重新核对，
+            # 不然仅扫描会一直显示待上传，而普通同步永远走 up_to_date 分支。
+            if record_md5 and record_md5 in self._cloud_md5:
+                stats.up_to_date += 1
+                return
+            logger.info("本地记录显示已上传，但云盘没有对应 MD5，重新核对: %s", audio.path)
 
         self.state.mark_seen(audio.path, audio.size, audio.mtime_ns)
         record = self.state.get(audio.path)
