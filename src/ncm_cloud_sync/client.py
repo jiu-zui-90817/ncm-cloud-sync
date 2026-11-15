@@ -609,6 +609,62 @@ class CloudClient:
             mapping.setdefault(md5, song_id)
         return mapping
 
+    def cloud_song_index(self) -> dict[str, dict[str, Any]]:
+        """云盘已有内容：md5 -> {song_id, name, artist, album, size}。
+
+        与 cloud_song_md5_map 使用相同的 md5 提取规则，但保留展示字段，
+        供“仅扫描”展示云端独有歌曲。
+        """
+        index: dict[str, dict[str, Any]] = {}
+        songs = self.cloud_songs()
+        self.last_cloud_song_count = len(songs)
+        for song in songs:
+            private = song.get("privateCloud")
+            detail = private if isinstance(private, dict) else song
+            md5 = str(detail.get("md5") or song.get("md5") or "").strip().lower()
+            if not md5:
+                continue
+            name = str(
+                detail.get("name")
+                or detail.get("songName")
+                or detail.get("fileName")
+                or song.get("name")
+                or song.get("songName")
+                or ""
+            )
+            artist = detail.get("artist") or song.get("artist") or ""
+            if isinstance(artist, list):
+                artist = " / ".join(
+                    str(item.get("name") if isinstance(item, dict) else item)
+                    for item in artist
+                    if item
+                )
+            album = detail.get("album") or song.get("album") or ""
+            if isinstance(album, dict):
+                album = album.get("name") or ""
+            size = _as_int(
+                detail.get("fileSize")
+                or detail.get("size")
+                or song.get("fileSize")
+                or song.get("size")
+                or 0,
+                0,
+            )
+            index.setdefault(
+                md5,
+                {
+                    "md5": md5,
+                    "song_id": _as_int(
+                        detail.get("songId") or song.get("songId") or 0, 0
+                    ),
+                    "name": name,
+                    "artist": str(artist or ""),
+                    "album": str(album or ""),
+                    "size": size or None,
+                },
+            )
+        return index
+
     def cloud_md5_set(self) -> set[str]:
         return set(self.cloud_song_md5_map())
 

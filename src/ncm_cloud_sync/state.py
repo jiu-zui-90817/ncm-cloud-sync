@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -38,8 +39,21 @@ CREATE TABLE IF NOT EXISTS runs (
     uploaded INTEGER NOT NULL DEFAULT 0,
     skipped INTEGER NOT NULL DEFAULT 0,
     failed INTEGER NOT NULL DEFAULT 0,
-    error TEXT
+    error TEXT,
+    mode TEXT NOT NULL DEFAULT 'sync',
+    stats_json TEXT
 );
+
+CREATE TABLE IF NOT EXISTS run_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    path TEXT,
+    name TEXT,
+    detail TEXT,
+    size INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_run_items_run ON run_items(run_id);
 
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -86,9 +100,20 @@ class StateStore:
             self.conn.execute("PRAGMA journal_mode=WAL")
             self.conn.execute("PRAGMA synchronous=NORMAL")
             self.conn.executescript(SCHEMA)
+            self._migrate()
             self.conn.commit()
         except sqlite3.Error as exc:
             raise StateError(f"无法打开状态数据库 {self.path}: {exc}") from exc
+
+    def _migrate(self) -> None:
+        """给旧版本数据库补齐运行明细字段。"""
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(runs)")}
+        if "mode" not in columns:
+            self.conn.execute(
+                "ALTER TABLE runs ADD COLUMN mode TEXT NOT NULL DEFAULT 'sync'"
+            )
+        if "stats_json" not in columns:
+            self.conn.execute("ALTER TABLE runs ADD COLUMN stats_json TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -194,7 +219,62 @@ class StateStore:
         rows = self.conn.execute(
             "SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._run_dict(row) for row in rows]
+
+    @staticmethod
+    def _run_dict(row: sqlite3.Row) -> dict[str, Any]:
+        data = dict(row)
+        raw = data.pop("stats_json", None)
+        if raw:
+            try:
+                data["stats"] = json.loads(raw)
+            except json.JSONDecodeError:
+                data["stats"] = None
+        else:
+            data["stats"] = None
+        return data
+
+    def run_detail(
+        self,
+        run_id: int,
+        *,
+        kind: str = "all",
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict[str, Any] | None:
+        row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            return None
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        counts = {
+            str(item["kind"]): int(item["n"])
+            for item in self.conn.execute(
+                "SELECT kind, COUNT(*) AS n FROM run_items WHERE run_id = ? GROUP BY kind",
+                (run_id,),
+            ).fetchall()
+        }
+        total = sum(counts.values()) if kind == "all" else counts.get(kind, 0)
+        sql = (
+            "SELECT kind, path, name, detail, size FROM run_items "  # noqa: S608
+            "WHERE run_id = ?"
+        )
+        params: list[Any] = [run_id]
+        if kind != "all":
+            sql += " AND kind = ?"
+            params.append(kind)
+        sql += " ORDER BY id LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        items = [dict(item) for item in self.conn.execute(sql, params).fetchall()]
+        return {
+            "run": self._run_dict(row),
+            "counts": counts,
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "kind": kind,
+        }
 
     def recent(self, limit: int = 20) -> list[FileRecord]:
         rows = self.conn.execute(
@@ -319,9 +399,9 @@ class StateStore:
         return cursor.rowcount
 
     # -- 运行记录 ---------------------------------------------------------
-    def start_run(self) -> int:
+    def start_run(self, mode: str = "sync") -> int:
         cursor = self.conn.execute(
-            "INSERT INTO runs (started_at) VALUES (?)", (utc_now(),)
+            "INSERT INTO runs (started_at, mode) VALUES (?, ?)", (utc_now(), mode)
         )
         self.conn.commit()
         return int(cursor.lastrowid)
@@ -335,15 +415,42 @@ class StateStore:
         skipped: int = 0,
         failed: int = 0,
         error: str | None = None,
+        stats: dict[str, Any] | None = None,
+        items: list[dict[str, Any]] | None = None,
     ) -> None:
+        stats_json = json.dumps(stats, ensure_ascii=False) if stats is not None else None
         self.conn.execute(
             """
             UPDATE runs SET finished_at = ?, scanned = ?, uploaded = ?, skipped = ?,
-                failed = ?, error = ? WHERE id = ?
+                failed = ?, error = ?, stats_json = ? WHERE id = ?
             """,
-            (utc_now(), scanned, uploaded, skipped, failed, error, run_id),
+            (utc_now(), scanned, uploaded, skipped, failed, error, stats_json, run_id),
         )
+        if items:
+            rows = []
+            for item in items:
+                rows.append(
+                    (
+                        run_id,
+                        str(item.get("kind") or "unknown")[:40],
+                        str(item["path"]) if item.get("path") else None,
+                        str(item["name"])[:500] if item.get("name") else None,
+                        str(item["detail"])[:2000] if item.get("detail") else None,
+                        int(item["size"]) if item.get("size") is not None else None,
+                    )
+                )
+            self.conn.executemany(
+                "INSERT INTO run_items (run_id, kind, path, name, detail, size) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
         # 运行记录只保留最近若干次，避免 SQLite 随长期运行无限增长。
+        # 先按当前 runs 清理明细，再删除旧 run，避免留下孤儿明细。
+        self.conn.execute(
+            "DELETE FROM run_items WHERE run_id NOT IN ("
+            "SELECT id FROM runs ORDER BY id DESC LIMIT ?)",
+            (self.RUN_HISTORY_LIMIT,),
+        )
         self.conn.execute(
             "DELETE FROM runs WHERE id NOT IN ("
             "SELECT id FROM runs ORDER BY id DESC LIMIT ?)",

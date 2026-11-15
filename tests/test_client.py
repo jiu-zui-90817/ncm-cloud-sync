@@ -267,6 +267,35 @@ def test_cloud_song_md5_map_reads_private_cloud() -> None:
     assert client.cloud_md5_set() == {"aaa", "bbb"}
 
 
+def test_cloud_song_index_keeps_metadata() -> None:
+    client = make_client()
+    client._weapi = lambda *a, **k: {  # type: ignore[method-assign]
+        "count": 2,
+        "data": [
+            {
+                "privateCloud": {
+                    "md5": "AAA",
+                    "songId": 12,
+                    "songName": "晴天",
+                    "artist": [{"name": "周杰伦"}],
+                    "album": {"name": "叶惠美"},
+                    "fileSize": 123,
+                }
+            },
+            {"md5": "bbb", "songId": 34, "name": "简单爱", "size": 45},
+        ],
+    }
+    index = client.cloud_song_index()
+    assert client.last_cloud_song_count == 2
+    assert index["aaa"]["song_id"] == 12
+    assert index["aaa"]["name"] == "晴天"
+    assert index["aaa"]["artist"] == "周杰伦"
+    assert index["aaa"]["album"] == "叶惠美"
+    assert index["aaa"]["size"] == 123
+    assert index["bbb"]["song_id"] == 34
+    assert index["bbb"]["name"] == "简单爱"
+
+
 def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
     path = tmp_path / "song.mp3"
     path.write_bytes(b"audio-bytes")

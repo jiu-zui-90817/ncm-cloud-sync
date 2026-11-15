@@ -15,13 +15,17 @@ from ncm_cloud_sync.syncer import Syncer
 
 
 class FakeClient:
-    def __init__(self, outcomes=None, cloud=None) -> None:
+    def __init__(self, outcomes=None, cloud=None, cloud_index=None) -> None:
         self.outcomes = outcomes or {}
         self.cloud = cloud or {}
+        self.cloud_index = cloud_index or {}
         self.calls: list[tuple[str, bool]] = []
 
     def cloud_song_md5_map(self) -> dict[str, int]:
         return dict(self.cloud)
+
+    def cloud_song_index(self) -> dict[str, dict]:
+        return dict(self.cloud_index)
 
     def upload(self, path, *, md5=None, dry_run=False):
         self.calls.append((Path(path).name, dry_run))
@@ -311,6 +315,40 @@ def test_small_and_unsupported_files_are_marked_ignored(tmp_path: Path) -> None:
         assert stats.skipped == 0
         assert state.get(small).status == "ignored"
         assert state.get(unsupported).status == "ignored"
+
+
+def test_scan_only_reports_local_cloud_diff(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a")
+    (music / "b.mp3").write_bytes(b"b")
+    (music / "c.mp3").write_bytes(b"a")
+    config = make_config(tmp_path, music)
+    md5_b = hashlib.md5(b"b").hexdigest()
+    md5_cloud = hashlib.md5(b"cloud").hexdigest()
+    client = FakeClient(
+        cloud_index={
+            md5_b: {"md5": md5_b, "song_id": 2, "name": "b", "artist": "x", "album": "y", "size": 1},
+            md5_cloud: {"md5": md5_cloud, "song_id": 3, "name": "cloud", "artist": "", "album": "", "size": 1},
+        }
+    )
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state, scan_only=True).run_once()
+        assert stats.mode == "scan"
+        assert stats.scanned == 3
+        assert stats.processed == 3
+        assert stats.to_upload == 1
+        assert stats.matched == 1
+        assert stats.duplicate_local == 1
+        assert stats.cloud_only == 1
+        assert client.calls == []
+        assert state.get(music / "a.mp3") is None
+
+        runs = state.recent_runs(1)
+        assert runs[0]["mode"] == "scan"
+        detail = state.run_detail(runs[0]["id"])
+        assert detail is not None
+        assert detail["counts"] == {"to_upload": 1, "matched": 1, "duplicate_local": 1, "cloud_only": 1}
 
 
 def test_excluded_history_is_hidden_not_missing(tmp_path: Path) -> None:

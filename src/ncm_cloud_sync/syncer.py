@@ -26,6 +26,10 @@ class SyncStats:
     scanned: int = 0
     processed: int = 0
     cloud_songs: int = 0
+    cloud_only: int = 0
+    matched: int = 0
+    to_upload: int = 0
+    duplicate_local: int = 0
     scan_unsupported: int = 0
     scan_excluded: int = 0
     scan_unreadable: int = 0
@@ -48,6 +52,7 @@ class SyncStats:
     paused: bool = False
     stopped: bool = False
     error: str = ""
+    mode: str = "sync"
 
     @property
     def skipped(self) -> int:
@@ -68,7 +73,30 @@ class SyncStats:
         return data
 
     def summary(self) -> str:
-        return (
+        if self.mode == "scan":
+            return (
+                f"仅扫描：本地候选 {self.scanned}"
+                + (
+                    f"（实际检查 {self.processed}）"
+                    if self.processed != self.scanned
+                    else ""
+                )
+                + f"，云盘 {self.cloud_songs} 首，待上传 {self.to_upload}，"
+                f"云端独有 {self.cloud_only}，已匹配 {self.matched}，"
+                f"本地重复 {self.duplicate_local}，失败 {self.failed}"
+                + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
+                + (f"，忽略 {self.ignored}" if self.ignored else "")
+                + f"，耗时 {self.duration:.1f}s"
+                + (
+                    f"；已终止，剩余 {self.deferred} 首待下次"
+                    if self.stopped
+                    else f"；已暂停，剩余 {self.deferred} 首待下次"
+                    if self.paused
+                    else ""
+                )
+            )
+        prefix = "演练：" if self.mode == "dry_run" else ""
+        return prefix + (
             f"扫描 {self.scanned}"
             + (
                 f"（实际处理 {self.processed}）"
@@ -113,17 +141,54 @@ class Syncer:
         progress: ProgressCallback | None = None,
         stop_event: Any | None = None,
         pause_event: Any | None = None,
+        scan_only: bool = False,
     ) -> None:
         self.config = config
         self.client = client
         self.state = state
         self.dry_run = dry_run
+        self.scan_only = scan_only
         self.force = force
         self.limit = limit
         self.progress = progress
         self.stop_event = stop_event
         self.pause_event = pause_event
         self._cloud_md5: dict[str, int] = {}
+        self._items: list[dict[str, Any]] = []
+        self.mode = "scan" if scan_only else ("dry_run" if dry_run else "sync")
+
+    def _record(
+        self,
+        kind: str,
+        *,
+        path: str | Path | None = None,
+        name: str | None = None,
+        detail: str | None = None,
+        size: int | None = None,
+    ) -> None:
+        if len(self._items) >= 5000:
+            return
+        self._items.append(
+            {
+                "kind": kind,
+                "path": str(path) if path is not None else None,
+                "name": name,
+                "detail": detail,
+                "size": size,
+            }
+        )
+
+    def _finish_run(self, run_id: int, stats: SyncStats) -> None:
+        self.state.finish_run(
+            run_id,
+            scanned=stats.scanned,
+            uploaded=stats.uploaded,
+            skipped=stats.skipped,
+            failed=stats.failed,
+            error=stats.error or None,
+            stats=stats.as_dict(),
+            items=self._items,
+        )
 
     def _notify(self, event: str, payload: dict[str, Any]) -> None:
         if self.progress is None:
@@ -173,7 +238,10 @@ class Syncer:
     def run_once(self) -> SyncStats:
         started = time.monotonic()
         stats = SyncStats()
-        run_id = self.state.start_run()
+        stats.mode = self.mode
+        if self.scan_only:
+            return self._run_scan_only(started, stats)
+        run_id = self.state.start_run(mode=self.mode)
         logger.info("开始扫描: %s", ", ".join(str(item) for item in self.config.music_dirs))
         if self.config.exclude_dirs:
             logger.info(
@@ -253,6 +321,13 @@ class Syncer:
                     stats.paused = True
                     stats.deferred = max(0, len(files) - processed + 1)
                     stats.error = f"网易云限流：{exc}。本次同步已暂停，稍后会自动继续。"
+                    self._record(
+                        "deferred",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"网易云限流：{exc}",
+                    )
                     logger.warning("触发网易云限流，本次同步暂停: %s", exc)
                     if not self.dry_run:
                         try:
@@ -268,6 +343,13 @@ class Syncer:
                         f"无法连接网易云上传节点：{exc}。"
                         "本次同步已暂停，请检查 NAS 网络后重试。"
                     )
+                    self._record(
+                        "deferred",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"上传节点不可用：{exc}",
+                    )
                     logger.warning("无法连接网易云上传节点，本次同步暂停: %s", exc)
                     if not self.dry_run:
                         try:
@@ -278,6 +360,13 @@ class Syncer:
                 except PermissionError as exc:
                     stats.failed += 1
                     stats.permission_denied += 1
+                    self._record(
+                        "permission",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail="没有读取权限，请在应用中心授权该目录",
+                    )
                     logger.warning(
                         "没有读取权限，跳过: %s（请给应用用户 ncm-cloud-sync 授予该目录读取权限）",
                         audio.path,
@@ -292,6 +381,13 @@ class Syncer:
                             logger.exception("写入失败状态时出错: %s", audio.path)
                 except Exception as exc:
                     stats.failed += 1
+                    self._record(
+                        "failed",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=str(exc) or exc.__class__.__name__,
+                    )
                     logger.exception("处理文件失败: %s", audio.path)
                     if not self.dry_run:
                         try:
@@ -301,24 +397,11 @@ class Syncer:
             self._check_missing(known, stats)
         except AuthError as exc:
             stats.duration = time.monotonic() - started
-            self.state.finish_run(
-                run_id,
-                scanned=stats.scanned,
-                uploaded=stats.uploaded,
-                skipped=stats.skipped,
-                failed=stats.failed,
-                error=str(exc),
-            )
+            stats.error = str(exc)
+            self._finish_run(run_id, stats)
             raise
         stats.duration = time.monotonic() - started
-        self.state.finish_run(
-            run_id,
-            scanned=stats.scanned,
-            uploaded=stats.uploaded,
-            skipped=stats.skipped,
-            failed=stats.failed,
-            error=stats.error or None,
-        )
+        self._finish_run(run_id, stats)
         self._notify("done", stats.as_dict())
         logger.info("同步完成: %s", stats.summary())
         return stats
@@ -342,6 +425,9 @@ class Syncer:
         if audio.size < self.config.min_size:
             stats.ignored += 1
             reason = f"文件小于 min_size ({self.config.min_size} 字节)，已忽略"
+            self._record(
+                "ignored", path=audio.path, name=audio.path.name, size=audio.size, detail=reason
+            )
             logger.info("%s: %s", reason, audio.path)
             if not self.dry_run:
                 self.state.mark_ignored(audio.path, reason)
@@ -350,6 +436,9 @@ class Syncer:
         if audio.suffix not in self.config.upload_extensions:
             stats.ignored += 1
             reason = f"扩展名 {audio.suffix} 不在 upload_extensions，已忽略"
+            self._record(
+                "ignored", path=audio.path, name=audio.path.name, size=audio.size, detail=reason
+            )
             logger.info("%s: %s", reason, audio.path)
             if not self.dry_run:
                 self.state.mark_ignored(audio.path, reason)
@@ -358,6 +447,9 @@ class Syncer:
         if self.config.max_upload_size and audio.size > self.config.max_upload_size:
             stats.failed += 1
             message = f"文件超过 max_upload_size ({self.config.max_upload_size} 字节)"
+            self._record(
+                "failed", path=audio.path, name=audio.path.name, size=audio.size, detail=message
+            )
             logger.warning("%s: %s", message, audio.path)
             if not self.dry_run:
                 self.state.mark_failed(audio.path, message)
@@ -378,6 +470,13 @@ class Syncer:
         canonical = self.state.find_by_md5(md5, exclude_path=str(audio.path))
         if canonical is not None:
             stats.skipped_local += 1
+            self._record(
+                "skipped_local",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail=f"与本地文件重复：{canonical.path}",
+            )
             logger.info("本地重复，跳过: %s -> %s", audio.path, canonical.path)
             if not self.dry_run:
                 self.state.mark_skipped(
@@ -395,6 +494,13 @@ class Syncer:
         if md5 in self._cloud_md5:
             cloud_song_id = self._cloud_md5.get(md5) or None
             stats.skipped_remote += 1
+            self._record(
+                "skipped_remote",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail=f"云盘已有相同内容（songId={cloud_song_id or '未知'}）",
+            )
             logger.info("云盘已有相同内容，跳过: %s -> songId=%s", audio.path, cloud_song_id)
             if not self.dry_run:
                 self.state.mark_skipped(
@@ -419,6 +525,13 @@ class Syncer:
 
         if result.reason == "remote_exists":
             stats.skipped_remote += 1
+            self._record(
+                "skipped_remote",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail=f"云端已存在（songId={result.song_id or '未知'}）",
+            )
             logger.info("云端已存在，跳过: %s", audio.path)
             if not self.dry_run:
                 self.state.mark_skipped(
@@ -434,12 +547,26 @@ class Syncer:
 
         if result.reason == "dry_run":
             stats.planned += 1
+            self._record(
+                "planned",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail="演练模式：未实际上传",
+            )
             logger.info("dry-run：待上传 %s", audio.path)
             self._notify("planned", {"path": str(audio.path)})
             return
 
         if result.reason == "linked":
             stats.linked += 1
+            self._record(
+                "linked",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail=f"补建云盘条目成功（songId={result.song_id or '未知'}）",
+            )
             logger.info("补建云盘条目成功: %s -> songId=%s", audio.path, result.song_id)
             if not self.dry_run:
                 self.state.mark_uploaded(
@@ -455,6 +582,13 @@ class Syncer:
 
         stats.uploaded += 1
         stats.bytes_uploaded += audio.size
+        self._record(
+            "uploaded",
+            path=audio.path,
+            name=audio.path.name,
+            size=audio.size,
+            detail=f"上传成功（songId={result.song_id or '未知'}）",
+        )
         logger.info("上传成功: %s -> songId=%s", audio.path, result.song_id)
         if not self.dry_run:
             self.state.mark_uploaded(
@@ -467,11 +601,224 @@ class Syncer:
             {"path": str(audio.path), "song_id": result.song_id, "size": audio.size},
         )
 
+    def _cloud_index(self) -> dict[str, dict[str, Any]]:
+        loader = getattr(self.client, "cloud_song_index", None)
+        if callable(loader):
+            data = loader() or {}
+            return {
+                str(md5).lower(): dict(value)
+                for md5, value in data.items()
+                if isinstance(value, dict)
+            }
+        mapping = self.client.cloud_song_md5_map()
+        return {
+            str(md5).lower(): {
+                "md5": str(md5).lower(),
+                "song_id": song_id,
+                "name": "",
+                "artist": "",
+                "album": "",
+                "size": None,
+            }
+            for md5, song_id in mapping.items()
+        }
+
+    def _run_scan_only(self, started: float, stats: SyncStats) -> SyncStats:
+        """只读扫描：本地候选与云盘列表对账，不写 files 表、不上传。"""
+        run_id = self.state.start_run(mode="scan")
+        logger.info("开始仅扫描: %s", ", ".join(str(item) for item in self.config.music_dirs))
+        try:
+            files, report = scan_with_report(
+                self.config.music_dirs,
+                self.config.extensions,
+                self.config.exclude,
+                self.config.exclude_dirs,
+            )
+            stats.scanned = len(files)
+            stats.scan_unsupported = report.unsupported
+            stats.scan_excluded = report.excluded + report.excluded_dirs
+            stats.scan_unreadable = report.unreadable
+            stats.scan_missing_roots = report.missing_roots
+            stats.unsupported_extensions = dict(report.unsupported_suffixes)
+            self._notify("scan_local", {"total": len(files)})
+            logger.info(
+                "仅扫描：本地候选 %d 个，扫描过滤 %d（扩展名 %d，排除 %d，不可读 %d）",
+                len(files),
+                report.filtered,
+                report.unsupported,
+                report.excluded + report.excluded_dirs,
+                report.unreadable,
+            )
+            cloud = self._cloud_index()
+            stats.cloud_songs = int(
+                getattr(self.client, "last_cloud_song_count", len(cloud)) or len(cloud)
+            )
+            self._notify("cloud_loaded", {"count": stats.cloud_songs})
+            logger.info("仅扫描：云盘 %d 首（%d 个不同 MD5）", stats.cloud_songs, len(cloud))
+
+            local_md5: dict[str, str] = {}
+            processed = 0
+            for audio in files:
+                if self._stopped():
+                    stats.aborted = True
+                    stats.stopped = True
+                    stats.deferred = max(0, len(files) - processed)
+                    stats.error = f"已终止本次仅扫描，剩余 {stats.deferred} 首未检查。"
+                    break
+                if self._paused():
+                    stats.aborted = True
+                    stats.paused = True
+                    stats.deferred = max(0, len(files) - processed)
+                    stats.error = f"已暂停本次仅扫描，剩余 {stats.deferred} 首未检查。"
+                    break
+                if self.limit is not None and processed >= self.limit:
+                    logger.info("已达到 --limit %d，提前结束仅扫描", self.limit)
+                    break
+                processed += 1
+                stats.processed = processed
+                self._notify(
+                    "scan",
+                    {"path": str(audio.path), "index": processed, "total": len(files)},
+                )
+
+                if audio.size < self.config.min_size:
+                    stats.ignored += 1
+                    self._record(
+                        "ignored",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"文件小于 min_size ({self.config.min_size} 字节)",
+                    )
+                    continue
+                if audio.suffix not in self.config.upload_extensions:
+                    stats.ignored += 1
+                    self._record(
+                        "ignored",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"扩展名 {audio.suffix} 不在 upload_extensions",
+                    )
+                    continue
+                if self.config.max_upload_size and audio.size > self.config.max_upload_size:
+                    stats.failed += 1
+                    self._record(
+                        "failed",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"文件超过 max_upload_size ({self.config.max_upload_size} 字节)",
+                    )
+                    continue
+
+                record = self.state.get(audio.path)
+                cached = (
+                    record.md5
+                    if record
+                    and record.md5
+                    and record.size == audio.size
+                    and record.mtime_ns == audio.mtime_ns
+                    else None
+                )
+                try:
+                    md5 = cached or file_md5(audio.path)
+                except PermissionError:
+                    stats.failed += 1
+                    stats.permission_denied += 1
+                    self._record(
+                        "permission",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail="没有读取权限，请在应用中心授权该目录",
+                    )
+                    continue
+                except Exception as exc:
+                    stats.failed += 1
+                    self._record(
+                        "failed",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=str(exc) or exc.__class__.__name__,
+                    )
+                    continue
+
+                if md5 in local_md5:
+                    stats.duplicate_local += 1
+                    self._record(
+                        "duplicate_local",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail=f"与本地文件重复：{local_md5[md5]}",
+                    )
+                    continue
+                local_md5[md5] = str(audio.path)
+                if md5 in cloud:
+                    stats.matched += 1
+                    self._record(
+                        "matched",
+                        path=audio.path,
+                        name=audio.path.name,
+                        size=audio.size,
+                        detail="本地与云端 MD5 一致",
+                    )
+                    continue
+                stats.to_upload += 1
+                detail = "本地有，云端没有"
+                if record is not None and record.status == "failed":
+                    detail += "；本地记录显示上次同步失败"
+                self._record(
+                    "to_upload",
+                    path=audio.path,
+                    name=audio.path.name,
+                    size=audio.size,
+                    detail=detail,
+                )
+
+            for md5, info in cloud.items():
+                if md5 in local_md5:
+                    continue
+                stats.cloud_only += 1
+                detail_parts = [
+                    str(info.get("artist") or "").strip(),
+                    str(info.get("album") or "").strip(),
+                ]
+                detail = " / ".join(item for item in detail_parts if item)
+                song_id = info.get("song_id")
+                if song_id:
+                    detail = (detail + f"（songId={song_id}）").strip()
+                self._record(
+                    "cloud_only",
+                    name=str(info.get("name") or "" )[:500] or None,
+                    size=info.get("size"),
+                    detail=detail or None,
+                )
+
+            stats.duration = time.monotonic() - started
+            self._finish_run(run_id, stats)
+            self._notify("done", stats.as_dict())
+            logger.info("仅扫描完成: %s", stats.summary())
+            return stats
+        except Exception as exc:
+            stats.duration = time.monotonic() - started
+            stats.error = stats.error or str(exc) or exc.__class__.__name__
+            self._finish_run(run_id, stats)
+            raise
+
     def _check_missing(self, known: set[str], stats: SyncStats) -> None:
         for record in list(self.state.missing_candidates(known)):
             if Path(record.path).exists():
                 continue
             stats.missing += 1
+            self._record(
+                "missing",
+                path=record.path,
+                name=Path(record.path).name,
+                detail="本地文件已不存在",
+            )
             logger.warning("文件已不存在，标记 missing: %s", record.path)
             if not self.dry_run:
                 self.state.mark_missing(record.path)

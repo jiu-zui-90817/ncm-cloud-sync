@@ -374,6 +374,38 @@ def test_static_page_has_about_and_update(tmp_path: Path) -> None:
     assert "favicon.svg" not in html
 
 
+def test_scan_only_trigger_is_readonly_and_resets(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+    save_session(app.config.session_path, {"MUSIC_U": "token", "__csrf": "csrf"})
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class ScanSyncer:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["scan_only"] = kwargs.get("scan_only")
+
+        def run_once(self):
+            stats = SyncStats()
+            stats.mode = "scan"
+            stats.scanned = 2
+            return stats
+
+    monkeypatch.setattr("ncm_cloud_sync.web.CloudClient", FakeClient)
+    monkeypatch.setattr("ncm_cloud_sync.web.Syncer", ScanSyncer)
+    assert app.sync.trigger(scan_only=True) is True
+    app.sync._thread.join(timeout=5)
+    assert captured["scan_only"] is True
+    status = app.sync.status()
+    assert status["state"] == "idle"
+    assert status["scan_only"] is False
+
+
 def test_stop_current_keeps_auto_sync_enabled(tmp_path: Path, monkeypatch: Any) -> None:
     app = make_app(tmp_path)
     save_session(app.config.session_path, {"MUSIC_U": "token", "__csrf": "csrf"})
@@ -593,6 +625,37 @@ def test_runs_api_and_status(tmp_path: Path) -> None:
     assert len(data["runs"]) == 1
 
 
+def test_run_detail_api(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        run_id = state.start_run("scan")
+        state.finish_run(
+            run_id,
+            stats={"mode": "scan", "to_upload": 1, "cloud_only": 1},
+            items=[
+                {"kind": "to_upload", "name": "a.mp3", "detail": "待上传"},
+                {"kind": "cloud_only", "name": "b", "detail": "仅云端"},
+            ],
+        )
+
+    status, _, data = call(app, f"/api/runs/{run_id}")
+    assert status == "200 OK"
+    assert data["run"]["mode"] == "scan"
+    assert data["counts"] == {"to_upload": 1, "cloud_only": 1}
+    assert data["total"] == 2
+    assert len(data["items"]) == 2
+
+    status, _, data = call(app, f"/api/runs/{run_id}", query="kind=cloud_only")
+    assert status == "200 OK"
+    assert data["total"] == 1
+    assert [item["name"] for item in data["items"]] == ["b"]
+
+    status, _, data = call(app, "/api/runs/99999")
+    assert status == "404 Not Found"
+    status, _, data = call(app, "/api/runs/abc")
+    assert status == "400 Bad Request"
+
+
 def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     status, _, html = call(app, "/")
@@ -611,3 +674,6 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert "pauseButton" in html
     assert "stopButton" in html
     assert "resumeButton" in html
+    assert "scanOnlyButton" in html
+    assert "runDetailModal" in html
+    assert "runDetailList" in html

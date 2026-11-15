@@ -17,7 +17,8 @@
     notifications: [],
     updateLoaded: false,
     updateLoading: false,
-    updateInfo: null
+    updateInfo: null,
+    runDetail: { runId: null, kind: "all", items: [], total: 0, offset: 0, limit: 200, loading: false, run: null, counts: {} }
   };
 
   var FIELD_LABELS = {
@@ -144,19 +145,48 @@
     }
     runs.forEach(function (run) {
       var item = document.createElement("li");
-      item.className = "run-row";
+      item.className = "run-row clickable";
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.title = "查看逐文件详情";
       var head = document.createElement("div");
       head.className = "run-head";
+      var left = document.createElement("div");
+      left.className = "run-head-left";
+      var badge = document.createElement("span");
+      badge.className = "run-badge" + (run.mode === "scan" ? " scan" : "");
+      badge.textContent = run.mode === "scan" ? "仅扫描" : (run.mode === "dry_run" ? "演练" : "同步");
+      left.appendChild(badge);
       var when = document.createElement("strong");
       when.textContent = formatRunTime(run.started_at) + " → " + formatRunTime(run.finished_at);
+      left.appendChild(when);
       var duration = document.createElement("span");
       duration.className = "run-duration";
       duration.textContent = "耗时 " + formatRunDuration(run.started_at, run.finished_at);
-      head.appendChild(when);
+      head.appendChild(left);
       head.appendChild(duration);
       var stats = document.createElement("div");
       stats.className = "run-stats";
-      ["扫描 " + (run.scanned || 0), "上传 " + (run.uploaded || 0), "跳过 " + (run.skipped || 0), "失败 " + (run.failed || 0)].forEach(function (text) {
+      var statTexts;
+      if (run.mode === "scan") {
+        var data = run.stats || {};
+        statTexts = [
+          "扫描 " + (run.scanned || 0),
+          "待上传 " + (data.to_upload || 0),
+          "云端独有 " + (data.cloud_only || 0),
+          "已匹配 " + (data.matched || 0),
+          "本地重复 " + (data.duplicate_local || 0),
+          "失败 " + (run.failed || 0)
+        ];
+      } else {
+        statTexts = [
+          "扫描 " + (run.scanned || 0),
+          "上传 " + (run.uploaded || 0),
+          "跳过 " + (run.skipped || 0),
+          "失败 " + (run.failed || 0)
+        ];
+      }
+      statTexts.forEach(function (text) {
         var span = document.createElement("span");
         span.textContent = text;
         stats.appendChild(span);
@@ -169,6 +199,13 @@
         error.textContent = run.error;
         item.appendChild(error);
       }
+      item.addEventListener("click", function () { openRunDetail(run.id); });
+      item.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openRunDetail(run.id);
+        }
+      });
       list.appendChild(item);
     });
   }
@@ -242,7 +279,10 @@
       skip_local: "本地重复，跳过",
       skip_remote: "云端已有，跳过",
       planned: "演练：待上传",
-      done: "同步完成",
+      scan_local: "扫描本地",
+      scan: "检查文件",
+      cloud_loaded: "读取云盘",
+      done: "任务完成",
       finished: "任务结束"
     };
     box.classList.remove("hidden");
@@ -254,8 +294,14 @@
       tag.textContent = labels[item.event] || item.event;
       var text = document.createElement("span");
       text.className = "progress-path";
-      if (item.event === "done") {
+      if (item.event === "done" && item.mode === "scan") {
+        text.textContent = "本地候选 " + (item.scanned || 0) + "，待上传 " + (item.to_upload || 0) + "，云端独有 " + (item.cloud_only || 0) + "，已匹配 " + (item.matched || 0);
+      } else if (item.event === "done") {
         text.textContent = "上传 " + (item.uploaded || 0) + "，跳过 " + (item.skipped || 0) + "，失败 " + (item.failed || 0);
+      } else if (item.event === "scan_local") {
+        text.textContent = "候选 " + (item.total || 0) + " 个";
+      } else if (item.event === "cloud_loaded") {
+        text.textContent = "云盘 " + (item.count || 0) + " 首";
       } else if (item.event === "finished") {
         text.textContent = "耗时 " + (item.duration || 0) + " 秒";
       } else {
@@ -351,6 +397,15 @@
       } else if (stats.paused) {
         text += " · 已暂停";
       }
+      if (stats.mode === "scan") {
+        text = formatDate(last.at) + " · 仅扫描：本地候选 " + (stats.scanned || 0) +
+          " · 待上传 " + (stats.to_upload || 0) +
+          " · 云端独有 " + (stats.cloud_only || 0) +
+          " · 已匹配 " + (stats.matched || 0) +
+          " · 本地重复 " + (stats.duplicate_local || 0) +
+          " · 失败 " + (stats.failed || 0) +
+          (stats.cloud_songs ? " · 云盘 " + stats.cloud_songs + " 首" : "");
+      }
       el("lastRun").textContent = text;
     }
     if (sync.auto_sync === false) {
@@ -362,6 +417,7 @@
     el("syncState").textContent = syncStateLabel(syncState);
     el("syncState").className = "tag" + (sync.running ? " active" : "");
     el("syncButton").disabled = Boolean(sync.running);
+    el("scanOnlyButton").disabled = Boolean(sync.running);
     el("dryRunButton").disabled = Boolean(sync.running);
     el("pauseButton").disabled = !sync.can_pause;
     el("stopButton").disabled = !sync.can_stop;
@@ -926,13 +982,203 @@
     });
   }
 
-  function syncNow(dryRun) {
-    api("/api/sync", { method: "POST", body: { dry_run: dryRun, force: el("forceRecheck").checked } }).then(function (data) {
-      showToast(data.started ? "同步任务已启动" : "已有同步任务在运行");
+  function syncNow(scanOnly, dryRun) {
+    api("/api/sync", {
+      method: "POST",
+      body: {
+        scan_only: Boolean(scanOnly),
+        dry_run: Boolean(dryRun),
+        force: el("forceRecheck").checked
+      }
+    }).then(function (data) {
+      var message = scanOnly ? "仅扫描任务已启动" : (dryRun ? "演练任务已启动" : "同步任务已启动");
+      showToast(data.started ? message : "已有同步任务在运行");
       loadStatus(false);
     }).catch(function (error) {
       showToast(error.message, true);
     });
+  }
+
+  var RUN_ITEM_LABELS = {
+    all: "全部",
+    uploaded: "上传成功",
+    linked: "补建云盘",
+    skipped_remote: "云端已有",
+    skipped_local: "本地重复",
+    planned: "演练待上传",
+    failed: "失败",
+    permission: "无权限",
+    ignored: "已忽略",
+    missing: "本地缺失",
+    deferred: "待续",
+    to_upload: "待上传",
+    cloud_only: "云端独有",
+    duplicate_local: "本地重复"
+  };
+
+  function runKindLabel(kind) {
+    return RUN_ITEM_LABELS[kind] || kind;
+  }
+
+  function openRunDetail(runId) {
+    state.runDetail = {
+      runId: runId,
+      kind: "all",
+      items: [],
+      total: 0,
+      offset: 0,
+      limit: 200,
+      loading: false,
+      run: null,
+      counts: {}
+    };
+    el("runDetailModal").classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    el("runDetailSummary").textContent = "正在读取逐文件详情…";
+    el("runDetailList").textContent = "";
+    el("runDetailChips").textContent = "";
+    el("runDetailMore").classList.add("hidden");
+    loadRunDetail(true);
+  }
+
+  function closeRunDetail() {
+    el("runDetailModal").classList.add("hidden");
+    document.body.classList.remove("modal-open");
+    state.runDetail.runId = null;
+  }
+
+  function runSummaryText(run, stats) {
+    var mode = (run && run.mode) || (stats && stats.mode) || "sync";
+    if (mode === "scan") {
+      return "仅扫描 · 本地候选 " + (stats.scanned || 0) +
+        " · 待上传 " + (stats.to_upload || 0) +
+        " · 云端独有 " + (stats.cloud_only || 0) +
+        " · 已匹配 " + (stats.matched || 0) +
+        " · 本地重复 " + (stats.duplicate_local || 0) +
+        " · 失败 " + (stats.failed || 0) +
+        (stats.cloud_songs ? " · 云盘 " + stats.cloud_songs + " 首" : "");
+    }
+    return (mode === "dry_run" ? "演练" : "同步") +
+      " · 扫描 " + (stats.scanned || 0) +
+      " · 上传 " + (stats.uploaded || 0) +
+      " · 跳过 " + (stats.skipped || 0) +
+      " · 失败 " + (stats.failed || 0);
+  }
+
+  function loadRunDetail(reset) {
+    var detail = state.runDetail;
+    if (detail.loading || !detail.runId) {
+      return;
+    }
+    if (reset) {
+      detail.kind = "all";
+      detail.offset = 0;
+      detail.items = [];
+      detail.total = 0;
+    }
+    detail.loading = true;
+    var url = "/api/runs/" + encodeURIComponent(detail.runId) +
+      "?kind=" + encodeURIComponent(detail.kind) +
+      "&limit=" + detail.limit + "&offset=" + detail.offset;
+    api(url).then(function (data) {
+      detail.run = data.run || detail.run;
+      detail.counts = data.counts || {};
+      detail.items = reset ? (data.items || []) : detail.items.concat(data.items || []);
+      detail.total = data.total || 0;
+      detail.offset = (data.offset || 0) + (data.items || []).length;
+      detail.loading = false;
+      renderRunDetail();
+    }).catch(function (error) {
+      detail.loading = false;
+      showToast(error.message, true);
+      el("runDetailSummary").textContent = error.message;
+    });
+  }
+
+  function renderRunDetail() {
+    var detail = state.runDetail;
+    var run = detail.run || {};
+    var stats = run.stats || {};
+    el("runDetailTitle").textContent = "运行详情";
+    el("runDetailSummary").textContent = (run.started_at ? formatRunTime(run.started_at) + " · " : "") + runSummaryText(run, stats);
+    var chips = el("runDetailChips");
+    chips.textContent = "";
+    var order = ["all", "uploaded", "linked", "skipped_remote", "skipped_local", "planned", "failed", "permission", "ignored", "missing", "deferred", "to_upload", "cloud_only", "duplicate_local"];
+    var counts = detail.counts || {};
+    var allCount = Object.keys(counts).reduce(function (sum, key) {
+      return sum + (counts[key] || 0);
+    }, 0);
+    order.forEach(function (kind) {
+      var count = kind === "all" ? allCount : (counts[kind] || 0);
+      if (kind !== "all" && !count) {
+        return;
+      }
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip" + (detail.kind === kind ? " active" : "");
+      chip.textContent = runKindLabel(kind) + " " + count;
+      chip.addEventListener("click", function () {
+        if (detail.loading || detail.kind === kind) {
+          return;
+        }
+        detail.kind = kind;
+        detail.offset = 0;
+        detail.items = [];
+        detail.total = 0;
+        renderRunDetail();
+        loadRunDetail(false);
+      });
+      chips.appendChild(chip);
+    });
+    var list = el("runDetailList");
+    list.textContent = "";
+    if (!detail.items.length) {
+      var empty = document.createElement("li");
+      empty.className = "run-empty";
+      empty.textContent = detail.loading ? "加载中…" : "该分类下没有记录";
+      list.appendChild(empty);
+    }
+    detail.items.forEach(function (item) {
+      var row = document.createElement("li");
+      row.className = "run-item";
+      var head = document.createElement("div");
+      head.className = "run-item-head";
+      var name = document.createElement("strong");
+      name.textContent = item.name || (item.path ? basename(item.path) : "云端歌曲");
+      var kind = document.createElement("span");
+      kind.className = "run-item-kind kind-" + (item.kind || "unknown");
+      kind.textContent = runKindLabel(item.kind);
+      head.appendChild(name);
+      head.appendChild(kind);
+      row.appendChild(head);
+      if (item.detail) {
+        var detailText = document.createElement("p");
+        detailText.className = "run-item-detail";
+        detailText.textContent = item.detail;
+        row.appendChild(detailText);
+      }
+      var meta = [];
+      if (item.size) {
+        meta.push(formatBytes(item.size));
+      }
+      if (item.path) {
+        meta.push(item.path);
+      }
+      if (meta.length) {
+        var metaText = document.createElement("p");
+        metaText.className = "run-item-path";
+        metaText.textContent = meta.join(" · ");
+        row.appendChild(metaText);
+      }
+      list.appendChild(row);
+    });
+    var more = el("runDetailMore");
+    if (detail.items.length < detail.total) {
+      more.classList.remove("hidden");
+      more.textContent = "加载更多（已显示 " + detail.items.length + " / " + detail.total + "）";
+    } else {
+      more.classList.add("hidden");
+    }
   }
 
   function syncAction(path, message) {
@@ -1047,8 +1293,21 @@
         loadDiagnostics("loginDiagnosticsView");
       }
     });
-    el("syncButton").addEventListener("click", function () { syncNow(false); });
-    el("dryRunButton").addEventListener("click", function () { syncNow(true); });
+    el("syncButton").addEventListener("click", function () { syncNow(false, false); });
+    el("scanOnlyButton").addEventListener("click", function () { syncNow(true, false); });
+    el("dryRunButton").addEventListener("click", function () { syncNow(false, true); });
+    el("runDetailClose").addEventListener("click", closeRunDetail);
+    el("runDetailMore").addEventListener("click", function () { loadRunDetail(false); });
+    el("runDetailModal").addEventListener("click", function (event) {
+      if (event.target === el("runDetailModal")) {
+        closeRunDetail();
+      }
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !el("runDetailModal").classList.contains("hidden")) {
+        closeRunDetail();
+      }
+    });
     el("pauseButton").addEventListener("click", pauseSync);
     el("stopButton").addEventListener("click", stopSync);
     el("resumeButton").addEventListener("click", resumeSync);

@@ -108,6 +108,7 @@
           </div>
           <div class="actions">
             <button id="syncButton" class="btn primary" type="button">立即同步</button>
+            <button id="scanOnlyButton" class="btn ghost" type="button">仅扫描</button>
             <button id="dryRunButton" class="btn ghost" type="button">演练（不上传）</button>
             <button id="pauseButton" class="btn ghost" type="button" disabled>暂停</button>
             <button id="stopButton" class="btn ghost" type="button" disabled>终止</button>
@@ -135,7 +136,7 @@
           <div class="card-head">
             <div>
               <h2>最近同步</h2>
-              <p class="muted">只保留最近 5 次执行记录，更早的记录会自动清理。</p>
+              <p class="muted">只保留最近 5 次执行记录，点击任意一条查看逐文件详情。</p>
             </div>
           </div>
           <ul id="runHistory" class="run-list">
@@ -298,6 +299,23 @@
       </div>
     </div>
   </main>
+
+  <div id="runDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="runDetailTitle">
+    <div class="modal-panel">
+      <div class="card-head">
+        <div>
+          <h2 id="runDetailTitle">运行详情</h2>
+          <p id="runDetailSummary" class="muted">加载中…</p>
+        </div>
+        <button id="runDetailClose" class="btn ghost" type="button">关闭</button>
+      </div>
+      <div id="runDetailChips" class="problem-switch run-detail-switch"></div>
+      <ul id="runDetailList" class="run-item-list"></ul>
+      <div class="actions run-detail-actions">
+        <button id="runDetailMore" class="btn ghost hidden" type="button">加载更多</button>
+      </div>
+    </div>
+  </div>
 
   <div id="toast" class="toast hidden" role="status"></div>
 </body>

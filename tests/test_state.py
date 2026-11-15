@@ -97,3 +97,54 @@ def test_mark_ignored_and_all_paths(tmp_path: Path) -> None:
         assert "排除规则" in record.last_error
         assert state.stats()["ignored"] == 1
         assert "hidden.mp3" in state.all_paths()
+
+
+def test_run_detail_and_scan_mode(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        run_id = state.start_run("scan")
+        state.finish_run(
+            run_id,
+            scanned=3,
+            stats={"mode": "scan", "to_upload": 2, "cloud_only": 1},
+            items=[
+                {"kind": "to_upload", "path": "a.mp3", "name": "a.mp3", "detail": "待上传", "size": 10},
+                {"kind": "to_upload", "path": "b.mp3", "name": "b.mp3", "detail": "待上传", "size": 20},
+                {"kind": "cloud_only", "name": "c", "detail": "仅云端"},
+            ],
+        )
+        runs = state.recent_runs(1)
+        assert runs[0]["mode"] == "scan"
+        assert runs[0]["stats"]["to_upload"] == 2
+
+        detail = state.run_detail(run_id)
+        assert detail is not None
+        assert detail["kind"] == "all"
+        assert detail["total"] == 3
+        assert detail["counts"] == {"to_upload": 2, "cloud_only": 1}
+        assert [item["name"] for item in detail["items"]] == ["a.mp3", "b.mp3", "c"]
+
+        only_cloud = state.run_detail(run_id, kind="cloud_only")
+        assert only_cloud is not None
+        assert only_cloud["total"] == 1
+        assert [item["kind"] for item in only_cloud["items"]] == ["cloud_only"]
+
+        page = state.run_detail(run_id, limit=1, offset=1)
+        assert page is not None
+        assert page["total"] == 3
+        assert [item["name"] for item in page["items"]] == ["b.mp3"]
+        assert state.run_detail(99999) is None
+
+
+def test_old_run_items_are_pruned_with_runs(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        for index in range(6):
+            run_id = state.start_run()
+            state.finish_run(
+                run_id,
+                items=[{"kind": "uploaded", "name": f"{index}.mp3"}],
+            )
+        runs = state.recent_runs(10)
+        assert len(runs) == 5
+        assert [run["id"] for run in runs] == [6, 5, 4, 3, 2]
+        rows = state.conn.execute("SELECT COUNT(*) FROM run_items").fetchone()[0]
+        assert rows == 5

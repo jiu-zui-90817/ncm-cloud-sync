@@ -510,6 +510,7 @@ class SyncManager:
         self._stop_run = threading.Event()
         self._running = False
         self._mode = ""
+        self._scan_only = False
         self._state = "idle"
         self._auto_paused = False
         self._started_at: str | None = None
@@ -543,7 +544,14 @@ class SyncManager:
             self.config.dry_run,
         )
 
-    def trigger(self, *, dry_run: bool = False, force: bool = False, source: str = "manual") -> bool:
+    def trigger(
+        self,
+        *,
+        dry_run: bool = False,
+        force: bool = False,
+        source: str = "manual",
+        scan_only: bool = False,
+    ) -> bool:
         if not self.sessions.has_session():
             raise AuthError("尚未登录，请先扫码登录")
         with self._lock:
@@ -555,13 +563,18 @@ class SyncManager:
             self._state = "running"
             self._auto_paused = False
             self._mode = source
+            self._scan_only = bool(scan_only)
             self._started_at = utc_now()
             self._error = None
             self._progress = []
             effective_dry_run = bool(dry_run or self.config.dry_run)
             self._thread = threading.Thread(
                 target=self._run,
-                kwargs={"dry_run": effective_dry_run, "force": force},
+                kwargs={
+                    "dry_run": effective_dry_run,
+                    "force": force,
+                    "scan_only": bool(scan_only),
+                },
                 name="ncm-sync",
                 daemon=True,
             )
@@ -590,7 +603,7 @@ class SyncManager:
             if self._running or self._state not in ("paused", "stopped"):
                 return False
             self._auto_paused = False
-        return self.trigger(source="resume")
+        return self.trigger(source="resume", scan_only=self._scan_only)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -610,6 +623,7 @@ class SyncManager:
             "can_stop": running and state == "running",
             "can_resume": (not running) and state in ("paused", "stopped"),
             "mode": mode,
+            "scan_only": self._scan_only,
             "started_at": started_at,
             "error": error,
             "progress": progress,
@@ -617,7 +631,7 @@ class SyncManager:
             "next_run_at": self._next_run_at,
         }
 
-    def _run(self, *, dry_run: bool, force: bool) -> None:
+    def _run(self, *, dry_run: bool, force: bool, scan_only: bool = False) -> None:
         started = time.monotonic()
         stats: SyncStats | None = None
         try:
@@ -639,6 +653,7 @@ class SyncManager:
                         progress=self._on_progress,
                         stop_event=self._stop_run,
                         pause_event=self._pause_run,
+                        scan_only=scan_only,
                     )
                     stats = syncer.run_once()
                 from .daemon import write_last_run
@@ -661,12 +676,14 @@ class SyncManager:
                 pass
         finally:
             try:
-                notify.notify_run(
-                    self.config.notify_channels,
-                    self.config.notify_on,
-                    stats or SyncStats(),
-                    self._error,
-                )
+                # 仅扫描是只读检查，不应触发同步成功/失败通知。
+                if not scan_only:
+                    notify.notify_run(
+                        self.config.notify_channels,
+                        self.config.notify_on,
+                        stats or SyncStats(),
+                        self._error,
+                    )
             except Exception:
                 logger.warning("同步结果通知发送失败", exc_info=True)
             with self._lock:
@@ -680,6 +697,7 @@ class SyncManager:
                     self._auto_paused = self._pause_run.is_set()
                 else:
                     self._state = "idle"
+                    self._scan_only = False
                 self._progress.append({"event": "finished", "duration": round(time.monotonic() - started, 1)})
 
     def _on_progress(self, event: str, payload: dict[str, Any]) -> None:
@@ -828,10 +846,12 @@ class WebApp:
                 return self._json(start_response, "200 OK", {"ok": True})
             if path == "/api/sync" and method == "POST":
                 body = self._body(environ)
+                scan_only = _as_bool(body.get("scan_only"), False)
                 started = self.sync.trigger(
-                    dry_run=_as_bool(body.get("dry_run"), False),
+                    dry_run=False if scan_only else _as_bool(body.get("dry_run"), False),
                     force=_as_bool(body.get("force"), False),
                     source="manual",
+                    scan_only=scan_only,
                 )
                 return self._json(
                     start_response,
@@ -895,6 +915,23 @@ class WebApp:
                 self.sync.apply_settings(settings)
                 self._apply_log_level(settings.get("log_level", "INFO"))
                 return self._json(start_response, "200 OK", {"ok": True, "settings": settings})
+            if path.startswith("/api/runs/") and method == "GET":
+                raw_id = path.rsplit("/", 1)[-1]
+                if not raw_id.isdigit():
+                    raise ValueError("运行记录 id 无效")
+                query = parse_qs(str(environ.get("QUERY_STRING") or ""))
+                kind = str((query.get("kind") or ["all"])[0] or "all")
+                limit = _as_int((query.get("limit") or ["200"])[0], 200, 1, 500)
+                offset = _as_int((query.get("offset") or ["0"])[0], 0, 0, 1000000)
+                with StateStore(self.config.db_path) as state:
+                    detail = state.run_detail(
+                        int(raw_id), kind=kind, limit=limit, offset=offset
+                    )
+                if detail is None:
+                    return self._json(
+                        start_response, "404 Not Found", {"error": "运行记录不存在"}
+                    )
+                return self._json(start_response, "200 OK", detail)
             if path == "/api/runs" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 limit = min(
