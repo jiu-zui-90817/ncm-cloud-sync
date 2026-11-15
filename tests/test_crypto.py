@@ -7,7 +7,7 @@ import json
 import pytest
 from Crypto.Cipher import AES
 
-from wy_music_cloud.crypto import (
+from ncm_cloud_sync.crypto import (
     EAPI_KEY,
     IV,
     PRESET_KEY,

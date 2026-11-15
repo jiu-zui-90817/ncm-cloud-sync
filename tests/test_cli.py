@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from wy_music_cloud.cli import main
+from ncm_cloud_sync.cli import main
 
 
 def test_scan_command(tmp_path: Path, capsys) -> None:
@@ -44,8 +44,8 @@ def test_config_dry_run_applies_to_sync_and_daemon(tmp_path: Path, monkeypatch) 
     import argparse
     from types import SimpleNamespace
 
-    from wy_music_cloud import cli
-    from wy_music_cloud.config import Config
+    from ncm_cloud_sync import cli
+    from ncm_cloud_sync.config import Config
 
     config = Config(music_dirs=[tmp_path], data_dir=tmp_path / "data", dry_run=True)
     captured = {}

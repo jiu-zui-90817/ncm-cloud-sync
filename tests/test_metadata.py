@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wy_music_cloud.metadata import read_tags, sanitize_filename, song_name
+from ncm_cloud_sync.metadata import read_tags, sanitize_filename, song_name
 
 
 def test_sanitize_filename() -> None:

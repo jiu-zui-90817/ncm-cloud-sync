@@ -10,10 +10,10 @@ import httpx
 import pytest
 from Crypto.Cipher import AES
 
-import wy_music_cloud.client as client_module
-from wy_music_cloud.crypto import EAPI_KEY
-from wy_music_cloud.client import CloudClient, NOS_BUCKET, parse_nos_host
-from wy_music_cloud.errors import ApiError, AuthError, NosUnavailableError, RateLimitError
+import ncm_cloud_sync.client as client_module
+from ncm_cloud_sync.crypto import EAPI_KEY
+from ncm_cloud_sync.client import CloudClient, NOS_BUCKET, parse_nos_host
+from ncm_cloud_sync.errors import ApiError, AuthError, NosUnavailableError, RateLimitError
 
 
 def make_client(**kwargs) -> CloudClient:

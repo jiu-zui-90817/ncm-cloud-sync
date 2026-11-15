@@ -13,9 +13,9 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-REPO_URL = "https://github.com/jiu-zui-90817/wy-music-cloud"
+REPO_URL = "https://github.com/jiu-zui-90817/ncm-cloud-sync"
 RELEASES_URL = REPO_URL + "/releases"
-LATEST_RELEASE_URL = "https://api.github.com/repos/jiu-zui-90817/wy-music-cloud/releases/latest"
+LATEST_RELEASE_URL = "https://api.github.com/repos/jiu-zui-90817/ncm-cloud-sync/releases/latest"
 
 
 def _now() -> str:
@@ -43,7 +43,7 @@ def fetch_latest_release(timeout: float = 10.0) -> dict[str, Any]:
         LATEST_RELEASE_URL,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "wy-music-cloud-update-check",
+            "User-Agent": "ncm-cloud-sync-update-check",
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:

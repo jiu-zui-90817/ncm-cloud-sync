@@ -30,6 +30,7 @@
     topic: "主题 / Topic",
     token: "Token",
     secret: "加签密钥（可选）",
+    keyword: "自定义关键词（可选，逗号分隔）",
     at_mobiles: "被 @ 手机号（可选，逗号分隔）",
     priority: "优先级（可选）",
     webhook_url: "Webhook 地址",
@@ -54,7 +55,7 @@
     var headers = Object.assign({ "Accept": "application/json" }, options.headers || {});
     var method = (options.method || "GET").toUpperCase();
     if (method !== "GET") {
-      headers["X-WY-Music"] = "web";
+      headers["X-NCM-Cloud-Sync"] = "web";
     }
     var init = {
       method: method,
@@ -737,7 +738,7 @@
     lines.push("进程 PID: " + (data.pid || "-"));
     lines.push("Unix Socket: " + (data.socket || "(未启用)"));
     lines.push("工作目录: " + (data.cwd || "-"));
-    ["TRIM_APPDEST", "TRIM_PKGVAR", "WY_MUSIC_DATA_DIR", "WY_MUSIC_SETTINGS", "WY_MUSIC_LOG_FILE"].forEach(function (key) {
+    ["TRIM_APPDEST", "TRIM_PKGVAR", "NCM_CLOUD_SYNC_DATA_DIR", "NCM_CLOUD_SYNC_SETTINGS", "NCM_CLOUD_SYNC_LOG_FILE"].forEach(function (key) {
       lines.push(key + ": " + ((data.env && data.env[key]) || "(空)"));
     });
     lines.push("");

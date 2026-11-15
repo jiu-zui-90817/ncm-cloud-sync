@@ -42,7 +42,7 @@ music_dir_error() {
   esac
   [ -e "$dir" ] || { printf '目录不存在'; return 1; }
   [ -d "$dir" ] || { printf '这不是目录'; return 1; }
-  [ -r "$dir" ] || { printf '应用用户没有读取权限，请在应用中心授权该目录，或给应用用户 wy-music-cloud 读权限'; return 1; }
+  [ -r "$dir" ] || { printf '应用用户没有读取权限，请在应用中心授权该目录，或给应用用户 ncm-cloud-sync 读权限'; return 1; }
   return 0
 }
 
@@ -67,9 +67,9 @@ write_login_hint() {
   local vardir="$1" appdir="$2"
   umask 077
   printf "%s\n" \
-    "网易云音乐云盘同步已安装。" \
+    "NCM 云盘同步已安装。" \
     "" \
-    "打开飞牛 NAS 桌面上的「网易云音乐云盘同步」图标即可使用。" \
+    "打开飞牛 NAS 桌面上的「NCM 云盘同步」图标即可使用。" \
     "首次进入后点击「生成登录二维码」，用网易云音乐 App 扫码登录。" \
     "" \
     "数据目录：$vardir/data" \
@@ -119,8 +119,8 @@ find_arch() {
 
 find_python() {
   local appdir="$1" candidate=""
-  if [ -n "${WY_MUSIC_PYTHON:-}" ] && [ -x "${WY_MUSIC_PYTHON}" ]; then
-    printf "%s" "${WY_MUSIC_PYTHON}"
+  if [ -n "${NCM_CLOUD_SYNC_PYTHON:-}" ] && [ -x "${NCM_CLOUD_SYNC_PYTHON}" ]; then
+    printf "%s" "${NCM_CLOUD_SYNC_PYTHON}"
     return 0
   fi
   # fnOS 的 python312 依赖通常装在 /var/apps/python312/target。

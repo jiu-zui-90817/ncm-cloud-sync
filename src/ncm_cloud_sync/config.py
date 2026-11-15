@@ -1,7 +1,7 @@
 """配置加载：YAML + 环境变量。
 
 优先级：CLI 参数 > 环境变量 > YAML 配置文件 > 内置默认值。
-配置文件位置：--config 指定；否则 WY_MUSIC_CONFIG；否则依次尝试
+配置文件位置：--config 指定；否则 NCM_CLOUD_SYNC_CONFIG；否则依次尝试
 ./config.yaml 与 /config/config.yaml（Docker 默认挂载点）。
 """
 
@@ -215,7 +215,7 @@ class Config:
     def _find_config_path(
         cls, config_path: str | Path | None, env: Mapping[str, str]
     ) -> Path | None:
-        candidate = config_path or env.get("WY_MUSIC_CONFIG")
+        candidate = config_path or env.get("NCM_CLOUD_SYNC_CONFIG")
         if candidate:
             path = Path(candidate).expanduser()
             if not path.is_file():
@@ -251,42 +251,42 @@ class Config:
             value = env.get(name)
             return value.strip() if value and value.strip() else None
 
-        dirs = text("WY_MUSIC_DIRS")
+        dirs = text("NCM_CLOUD_SYNC_DIRS")
         if dirs:
             values["music_dirs"] = [
                 _resolve_path(item, base) for item in _as_list(dirs)
             ]
-        data_dir = text("WY_MUSIC_DATA_DIR")
+        data_dir = text("NCM_CLOUD_SYNC_DATA_DIR")
         if data_dir:
             values["data_dir"] = _resolve_path(data_dir, base)
-        cookie = text("WY_MUSIC_COOKIE")
+        cookie = text("NCM_CLOUD_SYNC_COOKIE")
         if cookie:
             values["cookie"] = cookie
-        cookie_file = text("WY_MUSIC_COOKIE_FILE")
+        cookie_file = text("NCM_CLOUD_SYNC_COOKIE_FILE")
         if cookie_file:
             values["cookie_file"] = _resolve_path(cookie_file, base)
         for name, key in (
-            ("WY_MUSIC_EXTENSIONS", "extensions"),
-            ("WY_MUSIC_UPLOAD_EXTENSIONS", "upload_extensions"),
+            ("NCM_CLOUD_SYNC_EXTENSIONS", "extensions"),
+            ("NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS", "upload_extensions"),
         ):
             value = text(name)
             if value:
                 values[key] = _normalise_extensions(value)
-        exclude = text("WY_MUSIC_EXCLUDE")
+        exclude = text("NCM_CLOUD_SYNC_EXCLUDE")
         if exclude:
             values["exclude"] = tuple(_as_list(exclude))
-        exclude_dirs = text("WY_MUSIC_EXCLUDE_DIRS")
+        exclude_dirs = text("NCM_CLOUD_SYNC_EXCLUDE_DIRS")
         if exclude_dirs:
             values["exclude_dirs"] = tuple(
                 _resolve_path(item, base) for item in _as_list(exclude_dirs)
             )
         for name, key in (
-            ("WY_MUSIC_INTERVAL", "interval"),
-            ("WY_MUSIC_RATE_LIMIT", "rate_limit"),
-            ("WY_MUSIC_TIMEOUT", "timeout"),
-            ("WY_MUSIC_RETRIES", "retries"),
-            ("WY_MUSIC_MIN_SIZE", "min_size"),
-            ("WY_MUSIC_MAX_UPLOAD_SIZE", "max_upload_size"),
+            ("NCM_CLOUD_SYNC_INTERVAL", "interval"),
+            ("NCM_CLOUD_SYNC_RATE_LIMIT", "rate_limit"),
+            ("NCM_CLOUD_SYNC_TIMEOUT", "timeout"),
+            ("NCM_CLOUD_SYNC_RETRIES", "retries"),
+            ("NCM_CLOUD_SYNC_MIN_SIZE", "min_size"),
+            ("NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE", "max_upload_size"),
         ):
             value = text(name)
             if value:
@@ -294,22 +294,22 @@ class Config:
                     values[key] = type(getattr(cls, key))(value)
                 except ValueError as exc:
                     raise ConfigError(f"{name} 不是合法数字: {value}") from exc
-        auto_sync = text("WY_MUSIC_AUTO_SYNC")
+        auto_sync = text("NCM_CLOUD_SYNC_AUTO_SYNC")
         if auto_sync is not None:
             values["auto_sync"] = parse_bool(auto_sync, True)
-        notify_on = text("WY_MUSIC_NOTIFY_ON")
+        notify_on = text("NCM_CLOUD_SYNC_NOTIFY_ON")
         if notify_on:
             values["notify_on"] = notify_on.lower()
-        notify_channels = text("WY_MUSIC_NOTIFY_CHANNELS")
+        notify_channels = text("NCM_CLOUD_SYNC_NOTIFY_CHANNELS")
         if notify_channels:
             try:
                 values["notify_channels"] = tuple(normalize_channels(json.loads(notify_channels)))
             except (ValueError, json.JSONDecodeError) as exc:
-                raise ConfigError(f"WY_MUSIC_NOTIFY_CHANNELS 不是合法 JSON: {exc}") from exc
-        dry_run = text("WY_MUSIC_DRY_RUN")
+                raise ConfigError(f"NCM_CLOUD_SYNC_NOTIFY_CHANNELS 不是合法 JSON: {exc}") from exc
+        dry_run = text("NCM_CLOUD_SYNC_DRY_RUN")
         if dry_run is not None:
             values["dry_run"] = parse_bool(dry_run)
-        log_level = text("WY_MUSIC_LOG_LEVEL")
+        log_level = text("NCM_CLOUD_SYNC_LOG_LEVEL")
         if log_level:
             values["log_level"] = log_level.upper()
         return values
@@ -317,7 +317,7 @@ class Config:
     def validate(self) -> None:
         if not self.music_dirs:
             raise ConfigError(
-                "没有配置音乐目录。请设置 WY_MUSIC_DIRS 或在 config.yaml 中配置 music_dirs。"
+                "没有配置音乐目录。请设置 NCM_CLOUD_SYNC_DIRS 或在 config.yaml 中配置 music_dirs。"
             )
         for directory in self.music_dirs:
             if not directory.is_dir():

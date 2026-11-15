@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from wy_music_cloud.client import UploadResult
-from wy_music_cloud.config import Config
-from wy_music_cloud.errors import NosUnavailableError, RateLimitError, UploadError
-from wy_music_cloud.state import StateStore
-from wy_music_cloud.syncer import Syncer
+from ncm_cloud_sync.client import UploadResult
+from ncm_cloud_sync.config import Config
+from ncm_cloud_sync.errors import NosUnavailableError, RateLimitError, UploadError
+from ncm_cloud_sync.state import StateStore
+from ncm_cloud_sync.syncer import Syncer
 
 
 class FakeClient:
@@ -242,7 +242,7 @@ def test_permission_error_is_counted(tmp_path: Path, monkeypatch) -> None:
     def denied(path):
         raise PermissionError(13, "Permission denied", str(path))
 
-    monkeypatch.setattr("wy_music_cloud.syncer.file_md5", denied)
+    monkeypatch.setattr("ncm_cloud_sync.syncer.file_md5", denied)
     with StateStore(config.db_path) as state:
         stats = Syncer(config, FakeClient(), state).run_once()
         record = state.get(target)

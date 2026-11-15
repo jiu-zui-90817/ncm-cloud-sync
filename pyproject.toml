@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "wy-music-cloud"
-version = "0.2.22"
-description = "网易云音乐云盘自动同步工具，带 Web 管理界面，适合飞牛 NAS / Docker 长期运行"
+name = "ncm-cloud-sync"
+version = "0.3.0"
+description = "NCM Cloud Sync：网易云音乐云盘自动同步工具，带 Web 管理界面，适合飞牛 NAS / Docker 长期运行"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "wy-music-cloud contributors" }]
+authors = [{ name = "NCM Cloud Sync contributors" }]
 keywords = ["netease", "music", "cloud", "nas", "fnos", "sync"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -29,7 +29,7 @@ dependencies = [
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [project.scripts]
-wy-music-cloud = "wy_music_cloud.cli:main"
+ncm-cloud-sync = "ncm_cloud_sync.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

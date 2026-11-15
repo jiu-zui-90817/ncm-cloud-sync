@@ -14,9 +14,9 @@ pytest-cache-files-*/
 config.example/
 .tools/
 .dsh-ops/
-deploy/fnos/wy-music-cloud/app/server/
-deploy/fnos/wy-music-cloud/app/docker/context/
-deploy/fnos/wy-music-cloud/app/docker/.env
+deploy/fnos/ncm-cloud-sync/app/server/
+deploy/fnos/ncm-cloud-sync/app/docker/context/
+deploy/fnos/ncm-cloud-sync/app/docker/.env
 .venv/
 venv/
 .pytest_cache/

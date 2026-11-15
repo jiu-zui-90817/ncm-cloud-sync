@@ -1,13 +1,13 @@
 {
   ".url": {
-    "wy-music-cloud.main": {
-      "title": "网易云音乐云盘同步",
+    "ncm-cloud-sync.main": {
+      "title": "NCM 云盘同步",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
       "protocol": "",
-      "gatewayPrefix": "/app/wy-music-cloud",
+      "gatewayPrefix": "/app/ncm-cloud-sync",
       "gatewaySocket": "app.sock",
-      "url": "/app/wy-music-cloud/",
+      "url": "/app/ncm-cloud-sync/",
       "allUsers": false
     }
   }

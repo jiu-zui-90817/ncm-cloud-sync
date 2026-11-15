@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import wy_music_cloud.notify as notify
-from wy_music_cloud.config import Config
-from wy_music_cloud.session import load_session, save_session
-from wy_music_cloud.state import StateStore
-from wy_music_cloud.syncer import SyncStats
-from wy_music_cloud.web import (
+import ncm_cloud_sync.notify as notify
+from ncm_cloud_sync.config import Config
+from ncm_cloud_sync.session import load_session, save_session
+from ncm_cloud_sync.state import StateStore
+from ncm_cloud_sync.syncer import SyncStats
+from ncm_cloud_sync.web import (
     LoginFlow,
     SessionService,
     SettingsStore,
@@ -62,7 +62,7 @@ def call(
     if admin:
         environ["HTTP_X_TRIM_ISADMIN"] = "true"
     if verify:
-        environ["HTTP_X_WY_MUSIC"] = "web"
+        environ["HTTP_X_NCM_CLOUD_SYNC"] = "web"
     captured: dict[str, Any] = {}
 
     def start_response(status: str, headers: list[tuple[str, str]]) -> None:
@@ -109,7 +109,7 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
 
 def test_gateway_prefix_is_stripped(tmp_path: Path) -> None:
     app = make_app(tmp_path)
-    status, _, data = call(app, "/app/wy-music-cloud/api/health", admin=False)
+    status, _, data = call(app, "/app/ncm-cloud-sync/api/health", admin=False)
     assert status == "200 OK"
     assert data["ok"] is True
 
@@ -188,7 +188,7 @@ def test_qr_svg_contains_path() -> None:
 def test_login_flow_uses_official_qr_url(tmp_path: Path, monkeypatch: Any) -> None:
     app = make_app(tmp_path)
     monkeypatch.setattr(
-        "wy_music_cloud.web.CloudClient.qr_unikey", lambda self: "testkey"
+        "ncm_cloud_sync.web.CloudClient.qr_unikey", lambda self: "testkey"
     )
     result = app.login.start()
     try:
@@ -387,8 +387,8 @@ def test_stop_current_keeps_auto_sync_enabled(tmp_path: Path, monkeypatch: Any) 
             stats.stopped = self.stop_event.is_set()
             return stats
 
-    monkeypatch.setattr("wy_music_cloud.web.CloudClient", FakeClient)
-    monkeypatch.setattr("wy_music_cloud.web.Syncer", BlockingSyncer)
+    monkeypatch.setattr("ncm_cloud_sync.web.CloudClient", FakeClient)
+    monkeypatch.setattr("ncm_cloud_sync.web.Syncer", BlockingSyncer)
     assert app.sync.trigger() is True
     assert started.wait(5) is True
     assert app.sync.stop_current() is True
@@ -514,7 +514,7 @@ def test_cookie_login_saves_session(tmp_path: Path, monkeypatch: Any) -> None:
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr("wy_music_cloud.web.CloudClient", FakeClient)
+    monkeypatch.setattr("ncm_cloud_sync.web.CloudClient", FakeClient)
     status, _, data = call(
         app,
         "/api/login/cookie",

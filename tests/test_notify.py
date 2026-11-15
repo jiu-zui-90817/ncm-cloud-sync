@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-import wy_music_cloud.notify as notify
+import ncm_cloud_sync.notify as notify
 
 
 def test_normalize_channels_and_mask() -> None:
@@ -137,6 +137,7 @@ def test_dingtalk_signed_payload(monkeypatch: pytest.MonkeyPatch) -> None:
             "config": {
                 "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=abc",
                 "secret": secret,
+                "keyword": "音乐,云盘",
                 "at_mobiles": "13800000000,13900000000",
             },
         },
@@ -153,6 +154,7 @@ def test_dingtalk_signed_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = captured["json"]
     assert payload["msgtype"] == "markdown"
     assert payload["markdown"]["title"] == "同步完成"
+    assert payload["markdown"]["text"].startswith("音乐")
     assert payload["at"]["atMobiles"] == ["13800000000", "13900000000"]
 
 

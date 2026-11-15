@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-import wy_music_cloud.login as login
+import ncm_cloud_sync.login as login
 from urllib.parse import parse_qs, urlparse
-from wy_music_cloud.errors import AuthError
+from ncm_cloud_sync.errors import AuthError
 
 
 class FakeClient:

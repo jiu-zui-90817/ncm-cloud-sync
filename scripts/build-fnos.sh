@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP="$ROOT/deploy/fnos/wy-music-cloud"
+APP="$ROOT/deploy/fnos/ncm-cloud-sync"
 VERSION="$(sed -n 's/^version=//p' "$APP/manifest" | head -n 1)"
 if [ -z "$VERSION" ]; then
   echo "无法从 manifest 读取版本号。" >&2
@@ -25,7 +25,7 @@ if [ -f "$ROOT/.pipfix/run_pip.py" ]; then
 fi
 
 rm -rf "$TMP_ROOT" "$SERVER"
-rm -f "$DIST"/wy-music-cloud*.fpk "$ROOT"/*.fpk "$APP"/*.fpk
+rm -f "$DIST"/ncm-cloud-sync*.fpk "$ROOT"/*.fpk "$APP"/*.fpk
 mkdir -p "$TMP_ROOT" "$DIST" "$SERVER/vendor" "$APP/app/ui/images"
 chmod 777 "$TMP_ROOT"
 if command -v cygpath >/dev/null 2>&1; then
@@ -36,7 +36,7 @@ fi
 export TMPDIR="$TMP_FOR_FNPACK" TMP="$TMP_FOR_FNPACK" TEMP="$TMP_FOR_FNPACK"
 
 # 1. 应用源码
-cp -R "$ROOT/src/wy_music_cloud" "$SERVER/wy_music_cloud"
+cp -R "$ROOT/src/ncm_cloud_sync" "$SERVER/ncm_cloud_sync"
 find "$SERVER" -type d -name "__pycache__" -prune -exec rm -rf {} + 2>/dev/null || true
 find "$SERVER" -type f -name "*.pyc" -delete 2>/dev/null || true
 
@@ -67,7 +67,7 @@ done
 # 3. 图标（仓库已提交生成结果；缺失时再用 Pillow 生成）
 if [ ! -f "$APP/ICON.PNG" ] || [ ! -f "$APP/ICON_256.PNG" ] || \
    [ ! -f "$APP/app/ui/images/icon_64.png" ] || [ ! -f "$APP/app/ui/images/icon_256.png" ] || \
-   [ ! -f "$ROOT/src/wy_music_cloud/webui/favicon.png" ]; then
+   [ ! -f "$ROOT/src/ncm_cloud_sync/webui/favicon.png" ]; then
   "$PYTHON_BIN" "$ROOT/scripts/make_icons.py"
 fi
 
@@ -91,9 +91,9 @@ for FPK in "$APP"/*.fpk "$ROOT"/*.fpk; do
 done
 shopt -u nullglob
 
-FPK_FILE="$DIST/wy-music-cloud-$VERSION.fpk"
-if [ -f "$DIST/wy-music-cloud.fpk" ] && [ "$DIST/wy-music-cloud.fpk" != "$FPK_FILE" ]; then
-  mv "$DIST/wy-music-cloud.fpk" "$FPK_FILE"
+FPK_FILE="$DIST/ncm-cloud-sync-$VERSION.fpk"
+if [ -f "$DIST/ncm-cloud-sync.fpk" ] && [ "$DIST/ncm-cloud-sync.fpk" != "$FPK_FILE" ]; then
+  mv "$DIST/ncm-cloud-sync.fpk" "$FPK_FILE"
 fi
 if [ ! -f "$FPK_FILE" ]; then
   echo "fnpack 没有生成 $FPK_FILE，请检查上方错误。" >&2

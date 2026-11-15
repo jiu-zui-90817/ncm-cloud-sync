@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wy_music_cloud.state import StateStore
+from ncm_cloud_sync.state import StateStore
 
 
 def test_seen_uploaded_and_mtime_change(tmp_path: Path) -> None:

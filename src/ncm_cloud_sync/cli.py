@@ -15,19 +15,19 @@ from . import __version__
 from .client import CloudClient
 from .config import Config
 from .daemon import run_daemon, write_last_run
-from .errors import AuthError, ConfigError, WyMusicError
+from .errors import AuthError, ConfigError, NcmSyncError
 from .login import phone_login, qr_login
 from .scanner import scan
 from .session import resolve_cookies, save_session
 from .state import StateStore
 from .syncer import Syncer
 
-logger = logging.getLogger("wy_music_cloud")
+logger = logging.getLogger("ncm_cloud_sync")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="wy-music-cloud",
+        prog="ncm-cloud-sync",
         description="把本地音乐自动同步到网易云音乐云盘（带本地 + 云端去重）。",
     )
     parser.add_argument("-c", "--config", help="配置文件路径（默认 config.yaml 或 /config/config.yaml）")
@@ -89,8 +89,8 @@ def _client(config: Config) -> CloudClient:
     cookies, source = resolve_cookies(config)
     if not cookies:
         raise AuthError(
-            "没有可用的登录凭证。请先执行 wy-music-cloud login，"
-            "或设置 WY_MUSIC_COOKIE / cookie_file。"
+            "没有可用的登录凭证。请先执行 ncm-cloud-sync login，"
+            "或设置 NCM_CLOUD_SYNC_COOKIE / cookie_file。"
         )
     logger.debug("使用登录凭证来源: %s", source)
     return CloudClient(
@@ -333,7 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return dispatch(args)
-    except WyMusicError as exc:
+    except NcmSyncError as exc:
         logger.error("%s", exc)
         return 2
     except KeyboardInterrupt:

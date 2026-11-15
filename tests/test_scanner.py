@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wy_music_cloud.scanner import path_is_excluded, scan
+from ncm_cloud_sync.scanner import path_is_excluded, scan
 
 
 def test_scan_filters_extension_and_excludes(tmp_path: Path) -> None:

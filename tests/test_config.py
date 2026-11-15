@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from wy_music_cloud.config import Config, parse_bool
-from wy_music_cloud.errors import ConfigError
+from ncm_cloud_sync.config import Config, parse_bool
+from ncm_cloud_sync.errors import ConfigError
 
 
 def write_config(tmp_path: Path, music: Path, extra: str = "") -> Path:
@@ -36,9 +36,9 @@ def test_env_overrides_yaml(tmp_path: Path) -> None:
     loaded = Config.load(
         config,
         env={
-            "WY_MUSIC_DIRS": str(other),
-            "WY_MUSIC_DRY_RUN": "true",
-            "WY_MUSIC_INTERVAL": "5",
+            "NCM_CLOUD_SYNC_DIRS": str(other),
+            "NCM_CLOUD_SYNC_DRY_RUN": "true",
+            "NCM_CLOUD_SYNC_INTERVAL": "5",
         },
     )
     assert loaded.music_dirs == [other]

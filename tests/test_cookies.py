@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from wy_music_cloud.cookies import (
+from ncm_cloud_sync.cookies import (
     cookie_header,
     ensure_defaults,
     parse_cookie,
@@ -22,7 +22,7 @@ def test_parse_cookie_json_and_bare_value() -> None:
 
 
 def test_parse_cookie_invalid_json_is_config_error() -> None:
-    from wy_music_cloud.errors import ConfigError
+    from ncm_cloud_sync.errors import ConfigError
 
     with pytest.raises(ConfigError):
         parse_cookie('{"MUSIC_U": ')

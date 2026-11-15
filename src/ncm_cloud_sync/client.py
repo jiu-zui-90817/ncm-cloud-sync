@@ -468,7 +468,7 @@ class CloudClient:
         原版 getADDeviceID 返回 ``MAC@@@十六进制硬件串@@@@@@sha256``，
         服务端只校验格式与稳定性，因此用 deviceId 派生一个固定 MAC。
         """
-        seed = hashlib.sha256(("wy-music-cloud:" + device_id).encode("utf-8")).digest()
+        seed = hashlib.sha256(("ncm-cloud-sync:" + device_id).encode("utf-8")).digest()
         mac = ":".join(f"{byte:02X}" for byte in seed[:6])
         mac = f"{int(mac[:2], 16) & 0xFC:02X}" + mac[2:]
         legacy = hashlib.sha256(f"{device_id}:{mac}".encode("utf-8")).hexdigest().upper()[:32]

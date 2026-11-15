@@ -1,4 +1,4 @@
-# wy-music-cloud 配置示例
+# NCM Cloud Sync 配置示例
 # 复制为 config.yaml 后修改。容器内路径以 /music、/data 为准。
 
 # 要扫描的音乐目录，可以写多个。
@@ -10,7 +10,7 @@ music_dirs:
 # 状态库、session.json、qr.png、last_run.json 的存放目录。
 data_dir: /data
 
-# 可选：直接写 Cookie（不推荐，优先用 wy-music-cloud login）。
+# 可选：直接写 Cookie（不推荐，优先用 ncm-cloud-sync login）。
 cookie: ""
 
 # 可选：从文件读取 Cookie，文件内容可以是 Cookie 字符串、JSON 对象或单独的 MUSIC_U。

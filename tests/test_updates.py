@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from wy_music_cloud.updates import UpdateChecker, is_newer, parse_version
+from ncm_cloud_sync.updates import UpdateChecker, is_newer, parse_version
 
 
 def test_parse_version_and_newer() -> None:

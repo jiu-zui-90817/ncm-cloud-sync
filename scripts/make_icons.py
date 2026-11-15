@@ -5,9 +5,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
-APP = ROOT / "deploy" / "fnos" / "wy-music-cloud"
+APP = ROOT / "deploy" / "fnos" / "ncm-cloud-sync"
 UI = APP / "app" / "ui" / "images"
-WEBUI = ROOT / "src" / "wy_music_cloud" / "webui"
+WEBUI = ROOT / "src" / "ncm_cloud_sync" / "webui"
 
 
 def draw_icon(size: int) -> Image.Image:

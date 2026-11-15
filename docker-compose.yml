@@ -1,13 +1,13 @@
 services:
-  wy-music-cloud:
+  ncm-cloud-sync:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile
       args:
         PUID: "${PUID:-1000}"
         PGID: "${PGID:-1000}"
-    image: wy-music-cloud:latest
-    container_name: wy-music-cloud
+    image: ncm-cloud-sync:latest
+    container_name: ncm-cloud-sync
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai

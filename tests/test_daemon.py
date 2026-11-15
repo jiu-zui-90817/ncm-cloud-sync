@@ -4,9 +4,9 @@ import json
 import threading
 from pathlib import Path
 
-import wy_music_cloud.daemon as daemon
-from wy_music_cloud.config import Config
-from wy_music_cloud.syncer import SyncStats
+import ncm_cloud_sync.daemon as daemon
+from ncm_cloud_sync.config import Config
+from ncm_cloud_sync.syncer import SyncStats
 
 
 def make_config(tmp_path: Path) -> Config:

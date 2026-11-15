@@ -57,7 +57,7 @@ FIELDS = {
     "gotify": ("server", "token", "priority"),
     "discord": ("webhook_url",),
     "slack": ("webhook_url",),
-    "dingtalk": ("webhook_url", "secret", "at_mobiles"),
+    "dingtalk": ("webhook_url", "secret", "keyword", "at_mobiles"),
     "serverchan": ("sendkey",),
     "pushplus": ("token", "topic"),
     "pushover": ("token", "user"),
@@ -238,9 +238,17 @@ def send_channel(channel: dict[str, Any], title: str, content: str) -> None:
     if channel_type == "dingtalk":
         url = _url(_text(config.get("webhook_url")), label)
         url = _dingtalk_signed_url(url, _text(config.get("secret")))
+        markdown_text = "### " + title + "\n\n" + content
+        keywords = [
+            item.strip()
+            for item in _text(config.get("keyword")).replace("，", ",").replace("；", ";").replace(";", ",").split(",")
+            if item.strip()
+        ]
+        if keywords and not any(keyword in markdown_text for keyword in keywords):
+            markdown_text = keywords[0] + "\n\n" + markdown_text
         payload: dict[str, Any] = {
             "msgtype": "markdown",
-            "markdown": {"title": title, "text": "### " + title + "\n\n" + content},
+            "markdown": {"title": title, "text": markdown_text},
         }
         mobiles = [
             item.strip()

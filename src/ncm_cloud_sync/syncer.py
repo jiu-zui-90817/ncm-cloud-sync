@@ -222,14 +222,14 @@ class Syncer:
                     stats.failed += 1
                     stats.permission_denied += 1
                     logger.warning(
-                        "没有读取权限，跳过: %s（请给应用用户 wy-music-cloud 授予该目录读取权限）",
+                        "没有读取权限，跳过: %s（请给应用用户 ncm-cloud-sync 授予该目录读取权限）",
                         audio.path,
                     )
                     if not self.dry_run:
                         try:
                             self.state.mark_failed(
                                 audio.path,
-                                "没有读取权限，请在应用中心授权该目录，或给应用用户 wy-music-cloud 读权限",
+                                "没有读取权限，请在应用中心授权该目录，或给应用用户 ncm-cloud-sync 读权限",
                             )
                         except Exception:
                             logger.exception("写入失败状态时出错: %s", audio.path)

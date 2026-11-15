@@ -1,4 +1,4 @@
-"""python -m wy_music_cloud 入口。"""
+"""python -m ncm_cloud_sync 入口。"""
 
 import sys
 

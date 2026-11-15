@@ -26,7 +26,7 @@ from . import __version__, notify
 from .client import CloudClient
 from .config import Config
 from .cookies import ensure_defaults, parse_cookie
-from .errors import ApiError, AuthError, ConfigError, UploadError, WyMusicError
+from .errors import ApiError, AuthError, ConfigError, UploadError, NcmSyncError
 from .login import apply_qr_cookies, build_qr_url
 from .session import load_session, save_session
 from .state import StateStore
@@ -47,7 +47,7 @@ class _RingBufferHandler(logging.Handler):
             self.handleError(record)
 
 
-GATEWAY_PREFIX = "/app/wy-music-cloud"
+GATEWAY_PREFIX = "/app/ncm-cloud-sync"
 WEBUI_DIR = Path(__file__).with_name("webui")
 DEFAULT_MUSIC_DIR = "/vol1/1000/Music"
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -790,7 +790,7 @@ class WebApp:
             return self._json(start_response, "200 OK", {"ok": True, "version": __version__})
         if not self._is_admin(environ):
             return self._json(start_response, "403 Forbidden", {"error": "需要 fnOS 管理员权限"})
-        if method in {"POST", "PUT", "DELETE"} and environ.get("HTTP_X_WY_MUSIC") != "web":
+        if method in {"POST", "PUT", "DELETE"} and environ.get("HTTP_X_NCM_CLOUD_SYNC") != "web":
             return self._json(start_response, "403 Forbidden", {"error": "缺少请求校验头"})
 
         try:
@@ -919,7 +919,7 @@ class WebApp:
             return self._json(start_response, "400 Bad Request", {"error": str(exc)})
         except (ApiError, UploadError) as exc:
             return self._json(start_response, "502 Bad Gateway", {"error": str(exc)})
-        except WyMusicError as exc:
+        except NcmSyncError as exc:
             return self._json(start_response, "500 Internal Server Error", {"error": str(exc)})
 
     def _status(self) -> dict[str, Any]:
@@ -989,15 +989,15 @@ class WebApp:
             "executable": sys.executable,
             "platform": sys.platform,
             "cwd": os.getcwd(),
-            "socket": os.environ.get("WY_MUSIC_SOCKET", ""),
+            "socket": os.environ.get("NCM_CLOUD_SYNC_SOCKET", ""),
             "env": {
                 key: os.environ.get(key, "")
                 for key in (
                     "TRIM_APPDEST",
                     "TRIM_PKGVAR",
-                    "WY_MUSIC_DATA_DIR",
-                    "WY_MUSIC_SETTINGS",
-                    "WY_MUSIC_LOG_FILE",
+                    "NCM_CLOUD_SYNC_DATA_DIR",
+                    "NCM_CLOUD_SYNC_SETTINGS",
+                    "NCM_CLOUD_SYNC_LOG_FILE",
                 )
             },
             "logs": read_log_tail(self.log_paths, 120),
@@ -1110,7 +1110,7 @@ def setup_logging(path: Path | None, level: str) -> None:
 
 def build_app(config: Config, *, allow_local: bool = False) -> tuple[WebApp, SyncManager]:
     settings_path = Path(
-        os.environ.get("WY_MUSIC_SETTINGS") or (config.data_dir / "settings.json")
+        os.environ.get("NCM_CLOUD_SYNC_SETTINGS") or (config.data_dir / "settings.json")
     ).expanduser()
     store = SettingsStore(settings_path)
     settings = store.load()
@@ -1118,7 +1118,7 @@ def build_app(config: Config, *, allow_local: bool = False) -> tuple[WebApp, Syn
         settings = bootstrap_settings(config)
     apply_settings(config, settings)
     config.ensure_data_dir()
-    log_path = Path(os.environ.get("WY_MUSIC_LOG_FILE") or (config.data_dir / "app.log"))
+    log_path = Path(os.environ.get("NCM_CLOUD_SYNC_LOG_FILE") or (config.data_dir / "app.log"))
     setup_logging(log_path, config.log_level)
     sessions = SessionService(config)
     sync = SyncManager(config, sessions)
@@ -1138,10 +1138,10 @@ def build_app(config: Config, *, allow_local: bool = False) -> tuple[WebApp, Syn
 
 def main() -> int:
     config = Config.load(validate=False)
-    allow_local = _as_bool(os.environ.get("WY_MUSIC_DEV"), False)
+    allow_local = _as_bool(os.environ.get("NCM_CLOUD_SYNC_DEV"), False)
     app, sync = build_app(config, allow_local=allow_local)
     sync.start_scheduler()
-    socket_path = os.environ.get("WY_MUSIC_SOCKET", "").strip()
+    socket_path = os.environ.get("NCM_CLOUD_SYNC_SOCKET", "").strip()
 
     def _handle_signal(signum: int, frame: Any) -> None:
         raise KeyboardInterrupt
@@ -1164,12 +1164,12 @@ def main() -> int:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
-            print(f"wy-music-cloud web listening on unix:{path}", flush=True)
+            print(f"ncm-cloud-sync web listening on unix:{path}", flush=True)
             serve(app, unix_socket=str(path), unix_socket_perms="660", threads=8, channel_timeout=120)
         else:
-            host = os.environ.get("WY_MUSIC_HOST", "127.0.0.1")
-            port = _as_int(os.environ.get("WY_MUSIC_PORT", "8765"), 8765, 1, 65535)
-            print(f"wy-music-cloud web listening on http://{host}:{port}", flush=True)
+            host = os.environ.get("NCM_CLOUD_SYNC_HOST", "127.0.0.1")
+            port = _as_int(os.environ.get("NCM_CLOUD_SYNC_PORT", "8765"), 8765, 1, 65535)
+            print(f"ncm-cloud-sync web listening on http://{host}:{port}", flush=True)
             serve(app, host=host, port=port, threads=8, channel_timeout=120)
     except KeyboardInterrupt:
         logger.info("收到退出信号，Web UI 停止")

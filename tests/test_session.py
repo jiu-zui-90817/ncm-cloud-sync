@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from wy_music_cloud.errors import ConfigError
-from wy_music_cloud.session import load_session, resolve_cookies, save_session
+from ncm_cloud_sync.errors import ConfigError
+from ncm_cloud_sync.session import load_session, resolve_cookies, save_session
 
 
 class FakeConfig:

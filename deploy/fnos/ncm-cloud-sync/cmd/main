@@ -10,10 +10,10 @@ SOCKET="$APP_DIR/app.sock"
 PID="$VAR_DIR/app.pid"
 LOG="$VAR_DIR/app.log"
 
-export WY_MUSIC_DATA_DIR="$DATA_DIR"
-export WY_MUSIC_SETTINGS="$VAR_DIR/settings.json"
-export WY_MUSIC_SOCKET="$SOCKET"
-export WY_MUSIC_LOG_FILE="$LOG"
+export NCM_CLOUD_SYNC_DATA_DIR="$DATA_DIR"
+export NCM_CLOUD_SYNC_SETTINGS="$VAR_DIR/settings.json"
+export NCM_CLOUD_SYNC_SOCKET="$SOCKET"
+export NCM_CLOUD_SYNC_LOG_FILE="$LOG"
 export PYTHONUTF8=1
 export PYTHONUNBUFFERED=1
 
@@ -34,7 +34,7 @@ start_app() {
 
   local arch python vendor
   arch="$(find_arch)" || fail "不支持的 CPU 架构：$(uname -m)"
-  vendor="${WY_MUSIC_VENDOR:-$APP_DIR/server/vendor/$arch}"
+  vendor="${NCM_CLOUD_SYNC_VENDOR:-$APP_DIR/server/vendor/$arch}"
   [ -d "$vendor" ] || fail "缺少 $arch 依赖目录：$vendor"
   python="$(find_python "$APP_DIR")" || fail "找不到 python3，请确认已安装 python312 依赖"
   [ -x "$python" ] || fail "Python 不可执行：$python"
@@ -42,7 +42,7 @@ start_app() {
   export PYTHONPATH="$APP_DIR/server:$vendor${PYTHONPATH:+:$PYTHONPATH}"
   cd "$APP_DIR"
   printf "\n[%s] 启动 Web 服务\n" "$(date "+%Y-%m-%d %H:%M:%S")" >>"$LOG"
-  nohup "$python" -m wy_music_cloud.web >>"$LOG" 2>&1 &
+  nohup "$python" -m ncm_cloud_sync.web >>"$LOG" 2>&1 &
   printf "%s\n" "$!" >"$PID"
 
   local i pid

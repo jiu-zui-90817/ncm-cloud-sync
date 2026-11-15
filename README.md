@@ -1,8 +1,10 @@
-# wy-music-cloud
+# NCM Cloud Sync
 
 把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用，带 Web 管理界面、扫码登录，以及**本地 MD5 + 云端 upload/check 双重去重**。
 
 > 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端逆向出的 weapi / eapi / NOS 上传链路，接口随时可能变化。请先看[风险与限制](#风险与限制)。
+
+> **0.3.0 改名说明**：0.2.x 及更早版本名为 `wy-music-cloud`（应用用户 `wy-music-cloud`，数据目录 `/var/apps/wy-music-cloud/var`）。0.3.0 起项目名为 **NCM Cloud Sync**，fnOS 应用标识改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，CLI 改为 `ncm-cloud-sync`。这是新的应用标识，应用中心不会把它当作 0.2.x 的升级；迁移方式见下文。
 
 ![Web UI 概览页](docs/images/webui.png)
 
@@ -63,19 +65,31 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.22.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/ncm-cloud-sync/releases) 下载最新的版本化安装包（例如 `ncm-cloud-sync-0.3.0.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
 ```bash
-git clone https://github.com/jiu-zui-90817/wy-music-cloud.git
-cd wy-music-cloud
+git clone https://github.com/jiu-zui-90817/ncm-cloud-sync.git
+cd ncm-cloud-sync
 # 需要 fnOS 官方 fnpack，放到 .tools/ 或加入 PATH
 bash scripts/build-fnos.sh
-# 产物：dist/wy-music-cloud-<版本>.fpk
+# 产物：dist/ncm-cloud-sync-<版本>.fpk
 ```
 
 构建脚本会从 PyPI 下载 x86_64 / aarch64 的 cp312 离线 wheel，再调用 `fnpack` 打包；构建机需要网络，NAS 运行时不需要。
+
+### 从 0.2.x 迁移
+
+0.3.0 改了应用标识、包用户、数据目录和 Python 包名，应用中心不会把它当成 0.2.x 的升级。旧版本可以继续保留，确认新版本可用后再卸载。
+
+1. 停止旧应用，备份 `/var/apps/wy-music-cloud/var`；
+2. 安装 `ncm-cloud-sync-0.3.0.fpk`，启动一次让新数据目录生成，然后停止；
+3. 把旧目录里的 `settings.json` 和 `data/` 复制到 `/var/apps/ncm-cloud-sync/var/`，确认属主是新的应用用户 `ncm-cloud-sync`；
+4. 启动新应用，检查账号、音乐目录、排除目录和通知配置；登录态失效时重新扫码；
+5. 确认同步正常后再卸载旧应用，卸载前不要删除旧数据目录。
+
+环境变量前缀也从 `WY_MUSIC_` 改为 `NCM_CLOUD_SYNC_`，Web 请求头改为 `X-NCM-Cloud-Sync`，Docker 服务名/容器名改为 `ncm-cloud-sync`；旧 `.env` 不会自动迁移。
 
 ### 2. 安装向导
 
@@ -92,7 +106,7 @@ bash scripts/build-fnos.sh
 
 ### 3. 启动
 
-在应用中心启动「网易云音乐云盘同步」，然后点击桌面图标或应用中心的“打开”。Web UI 通过飞牛统一网关加载，无需额外端口，也无需 SSH。
+在应用中心启动「NCM 云盘同步」，然后点击桌面图标或应用中心的“打开”。Web UI 通过飞牛统一网关加载，无需额外端口，也无需 SSH。
 
 首次启动会初始化数据目录并拉起后台服务；如果页面暂时打不开，等几秒后刷新，或到应用数据目录查看 `app.log`。
 
@@ -118,7 +132,7 @@ bash scripts/build-fnos.sh
 
 ### 数据目录与备份
 
-应用数据目录通常在 `/var/apps/wy-music-cloud/var`（以应用中心显示为准），里面有：
+应用数据目录通常在 `/var/apps/ncm-cloud-sync/var`（以应用中心显示为准），里面有：
 
 ```text
 var/
@@ -152,7 +166,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.22** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.3.0** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -160,7 +174,7 @@ var/
 
 **安装时提示“音乐目录不可用”**
 
-按提示里的原因处理：`目录不存在` 检查路径；`没有读取权限` 到应用中心授权该目录，或在文件管理里给应用用户 `wy-music-cloud` 读权限；`必须是绝对路径` 确认以 `/` 开头。路径请保持一行，不要从聊天/文件管理器里粘成两行；0.2.1 也会自动去掉粘贴时带入的换行。目录名区分大小写。
+按提示里的原因处理：`目录不存在` 检查路径；`没有读取权限` 到应用中心授权该目录，或在文件管理里给应用用户 `ncm-cloud-sync` 读权限；`必须是绝对路径` 确认以 `/` 开头。路径请保持一行，不要从聊天/文件管理器里粘成两行；0.2.1 也会自动去掉粘贴时带入的换行。目录名区分大小写。
 
 **扫描不到音乐**
 
@@ -168,11 +182,11 @@ var/
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.2.22，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.3.0，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.2.22，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
+0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.3.0，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 
@@ -184,7 +198,7 @@ var/
 
 **很多文件提示没有读取权限 / 失败里“无权限”很多**
 
-应用以包用户 `wy-music-cloud` 运行。如果音乐文件属于其他用户且权限是 600，应用无法读取。到应用中心给本应用授权音乐目录，或在文件管理里给应用用户 `wy-music-cloud` 增加读取权限。0.2.10 会把这类错误单独计入“无权限”，日志每个文件只记一行警告，不再打印整段 traceback；0.2.20 起可在概览点“无权限”卡片查看具体路径和原因，授权后点“重置并重试”即可重新排队。0.2.21 起，命中排除规则的旧记录会自动转为 `ignored` 并从统计和问题列表隐藏，不再占用“待处理/失败”数字。
+应用以包用户 `ncm-cloud-sync` 运行。如果音乐文件属于其他用户且权限是 600，应用无法读取。到应用中心给本应用授权音乐目录，或在文件管理里给应用用户 `ncm-cloud-sync` 增加读取权限。0.2.10 会把这类错误单独计入“无权限”，日志每个文件只记一行警告，不再打印整段 traceback；0.2.20 起可在概览点“无权限”卡片查看具体路径和原因，授权后点“重置并重试”即可重新排队。0.2.21 起，命中排除规则的旧记录会自动转为 `ignored` 并从统计和问题列表隐藏，不再占用“待处理/失败”数字。
 
 **提示“云端已有”，但云盘里是空的**
 
@@ -212,8 +226,8 @@ var/
 cp config.example.yaml config.yaml
 # 编辑 config.yaml，至少设置 music_dirs
 docker compose build
-docker compose run --rm wy-music-cloud login --qr-png /data/qr.png
-docker compose run --rm wy-music-cloud sync --dry-run --limit 5
+docker compose run --rm ncm-cloud-sync login --qr-png /data/qr.png
+docker compose run --rm ncm-cloud-sync sync --dry-run --limit 5
 docker compose up -d
 ```
 
@@ -229,9 +243,9 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 pip install -e .
 
-wy-music-cloud login
-wy-music-cloud --music-dir "D:\Music" sync --dry-run --limit 5
-wy-music-cloud --music-dir "D:\Music" sync
+ncm-cloud-sync login
+ncm-cloud-sync --music-dir "D:\Music" sync --dry-run --limit 5
+ncm-cloud-sync --music-dir "D:\Music" sync
 ```
 
 注意：`--music-dir`、`--config`、`--log-level` 是**全局参数，要写在子命令前面**。
@@ -264,9 +278,9 @@ wy-music-cloud --music-dir "D:\Music" sync
 
 环境变量优先级高于 YAML，低于命令行参数。支持：
 
-`WY_MUSIC_CONFIG`、`WY_MUSIC_DIRS`、`WY_MUSIC_DATA_DIR`、`WY_MUSIC_COOKIE`、`WY_MUSIC_COOKIE_FILE`、`WY_MUSIC_EXTENSIONS`、`WY_MUSIC_UPLOAD_EXTENSIONS`、`WY_MUSIC_EXCLUDE`、`WY_MUSIC_EXCLUDE_DIRS`、`WY_MUSIC_AUTO_SYNC`、`WY_MUSIC_NOTIFY_ON`、`WY_MUSIC_NOTIFY_CHANNELS`、`WY_MUSIC_INTERVAL`、`WY_MUSIC_RATE_LIMIT`、`WY_MUSIC_TIMEOUT`、`WY_MUSIC_RETRIES`、`WY_MUSIC_MIN_SIZE`、`WY_MUSIC_MAX_UPLOAD_SIZE`、`WY_MUSIC_DRY_RUN`、`WY_MUSIC_LOG_LEVEL`。
+`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_DRY_RUN`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
 
-`WY_MUSIC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`WY_MUSIC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
+`NCM_CLOUD_SYNC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`NCM_CLOUD_SYNC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
 
 ### 通知配置
 
@@ -280,13 +294,15 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `gotify` | `server`, `token` | 可选 `priority` |
 | `discord` | `webhook_url` | Discord Webhook |
 | `slack` | `webhook_url` | Slack Incoming Webhook |
-| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`at_mobiles` 被 @ 手机号 |
+| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`keyword` 自定义关键词、`at_mobiles` 被 @ 手机号 |
 | `serverchan` | `sendkey` | Server酱 |
 | `pushplus` | `token` | PushPlus |
 | `pushover` | `token`, `user` | Pushover |
 | `pushdeer` | `pushkey` | PushDeer |
 | `webhook` | `url` | 通用 JSON POST |
 | `smtp` | `host`, `mail_from`, `mail_to` | SMTP 邮件；可选 `port`、`username`、`password`、`security` |
+
+钉钉机器人安全设置：加签填 `secret`；自定义关键词填 `keyword`（多个用逗号分隔，消息不含关键词时程序会自动补上第一个）；IP 地址段白名单要在钉钉侧填 NAS 的出口公网 IP，程序无法代填。钉钉若同时启用关键词和加签，两者都要满足。
 
 0.2.22 修复了同步结束通知被静默跳过的问题：此前通知配置在内部是 tuple，归一化只接受 list，导致钉钉等所有渠道在同步结束后都不发送（测试按钮不受影响）；升级后请重新保存一次通知页并点“测试”确认。
 
@@ -295,7 +311,7 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 ## 命令
 
 ```text
-wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
+ncm-cloud-sync [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 ```
 
 | 命令 | 作用 |
@@ -334,7 +350,7 @@ wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 
 ## 风险与限制
 
-- 使用的是**非公开接口**，随时可能失效；协议集中在 [src/wy_music_cloud/client.py](src/wy_music_cloud/client.py)，细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
+- 使用的是**非公开接口**，随时可能失效；协议集中在 [src/ncm_cloud_sync/client.py](src/ncm_cloud_sync/client.py)，细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)。
 - 不要用主账号做高频、大批量上传；建议先用演练 / `--limit` 小流量验证。
 - 云盘容量、单文件大小、格式支持由网易云账号决定；本项目不做转码。
 - 云盘是扁平结构，本项目不创建文件夹层级。
@@ -363,7 +379,7 @@ bash scripts/build-fnos.sh
 ## 目录结构
 
 ```text
-src/wy_music_cloud/
+src/ncm_cloud_sync/
 ├── cli.py          # 命令行
 ├── client.py       # 网易云 weapi + NOS 上传（最脆弱的部分）
 ├── syncer.py       # 扫描 → 去重 → 上传 → 落库
@@ -379,7 +395,7 @@ src/wy_music_cloud/
 ├── config.py       # YAML + 环境变量配置
 ├── web.py          # Web UI WSGI 后端 / API
 └── webui/          # 内置前端（HTML/CSS/JS）
-deploy/fnos/wy-music-cloud/  # 原生 fnOS 应用工程（manifest、wizard、生命周期脚本、离线依赖）
+deploy/fnos/ncm-cloud-sync/  # 原生 fnOS 应用工程（manifest、wizard、生命周期脚本、离线依赖）
 deploy/docker/               # 可选 Dockerfile、entrypoint
 scripts/                     # 图标生成、fpk 构建与权限修复
 docs/                        # 协议说明、飞牛部署指南
