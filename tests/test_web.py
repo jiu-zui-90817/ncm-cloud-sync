@@ -113,6 +113,33 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert headers["Content-Type"].startswith("text/html")
 
 
+def test_capacity_api_returns_cloud_space(tmp_path: Path, monkeypatch: Any) -> None:
+    app = make_app(tmp_path)
+    capacity = {
+        "supported": True,
+        "total_bytes": 1000,
+        "used_bytes": 250,
+        "free_bytes": 750,
+        "percent": 25.0,
+        "songs": 3,
+    }
+
+    class FakeCapacityClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def cloud_capacity(self):
+            return dict(capacity)
+
+    monkeypatch.setattr(app.sessions, "client", lambda: FakeCapacityClient())
+    status, _, data = call(app, "/api/capacity")
+    assert status == "200 OK"
+    assert data["capacity"] == capacity
+
+
 def test_gateway_prefix_is_stripped(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     status, _, data = call(app, "/app/ncm-cloud-sync/api/health", admin=False)

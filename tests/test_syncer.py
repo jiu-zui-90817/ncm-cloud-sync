@@ -16,13 +16,20 @@ from ncm_cloud_sync.syncer import Syncer
 
 class FakeClient:
     def __init__(
-        self, outcomes=None, cloud=None, cloud_index=None, preflight_error=None, cloud_error=None
+        self,
+        outcomes=None,
+        cloud=None,
+        cloud_index=None,
+        preflight_error=None,
+        cloud_error=None,
+        capacity=None,
     ) -> None:
         self.outcomes = outcomes or {}
         self.cloud = cloud or {}
         self.cloud_index = cloud_index or {}
         self.preflight_error = preflight_error
         self.cloud_error = cloud_error
+        self.last_cloud_capacity = capacity or {}
         self.calls: list[str] = []
 
     def preflight(self, index):
@@ -119,6 +126,49 @@ def test_skipped_remote_record_is_rechecked(tmp_path: Path) -> None:
         stats = Syncer(config, second, state).run_once()
         assert stats.uploaded == 1
         assert len(second.calls) == 1
+
+
+def test_capacity_insufficient_blocks_upload(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient(
+        capacity={
+            "supported": True,
+            "total_bytes": 50,
+            "used_bytes": 10,
+            "free_bytes": 40,
+        }
+    )
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.failed == 1
+        assert stats.capacity_insufficient == 1
+        assert stats.capacity_total == 50
+        assert stats.capacity_free == 40
+        assert client.calls == []
+        assert state.get(music / "a.mp3").status == "failed"
+
+
+def test_capacity_enough_allows_upload(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient(
+        capacity={
+            "supported": True,
+            "total_bytes": 1000,
+            "used_bytes": 100,
+            "free_bytes": 900,
+        }
+    )
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.uploaded == 1
+        assert stats.capacity_insufficient == 0
+        assert client.calls == ["a.mp3"]
 
 
 def test_cloud_reconciliation_skips_before_upload(tmp_path: Path) -> None:

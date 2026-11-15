@@ -964,6 +964,14 @@ class WebApp:
                         "log_limit_bytes": LOG_MAX_BYTES * (LOG_BACKUP_COUNT + 1),
                     },
                 )
+            if path == "/api/capacity" and method == "GET":
+                with self.sessions.client() as client:
+                    capacity = client.cloud_capacity()
+                return self._json(
+                    start_response,
+                    "200 OK",
+                    {"capacity": capacity},
+                )
             if path == "/api/account/refresh" and method == "POST":
                 with self.sessions.client() as client:
                     profile = client.login_status()

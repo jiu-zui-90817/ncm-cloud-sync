@@ -310,10 +310,67 @@ h2 {
   margin-bottom: 4px;
 }
 
+.account-main {
+  min-width: 0;
+}
+
 .account-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.account-capacity {
+  margin-top: 10px;
+  max-width: 360px;
+}
+
+.capacity-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.capacity-label {
+  color: var(--muted);
+}
+
+#capacityText {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.capacity-track {
+  height: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  background: #eef0f4;
+  border-radius: 999px;
+}
+
+.capacity-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--green);
+  border-radius: inherit;
+  transition: width 0.3s ease, background 0.2s ease;
+}
+
+.capacity-fill.warn {
+  background: var(--amber);
+}
+
+.capacity-fill.danger {
+  background: var(--red);
+}
+
+.capacity-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .stats-grid {

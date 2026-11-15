@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
+def _human_size(size: int) -> str:
+    value = max(int(size or 0), 0)
+    if value >= 1024 * 1024 * 1024:
+        return f"{value / 1024 / 1024 / 1024:.2f} GB"
+    if value >= 1024 * 1024:
+        return f"{value / 1024 / 1024:.1f} MB"
+    if value >= 1024:
+        return f"{value / 1024:.1f} KB"
+    return f"{value} B"
+
+
 @dataclass
 class SyncStats:
     scanned: int = 0
@@ -47,6 +58,10 @@ class SyncStats:
     ignored: int = 0
     missing: int = 0
     bytes_uploaded: int = 0
+    capacity_total: int = 0
+    capacity_used: int = 0
+    capacity_free: int = 0
+    capacity_insufficient: int = 0
     duration: float = 0.0
     aborted: bool = False
     paused: bool = False
@@ -248,6 +263,35 @@ class Syncer:
             stats.cloud_songs,
             len(self._cloud_md5),
         )
+        self._load_capacity(stats)
+
+    def _load_capacity(self, stats: SyncStats) -> None:
+        """记录云盘容量；接口未返回容量时保持未知，不能误判为空间不足。"""
+        capacity = getattr(self.client, "last_cloud_capacity", None)
+        if not isinstance(capacity, dict):
+            return
+        try:
+            total = int(capacity.get("total_bytes") or 0)
+            used = int(capacity.get("used_bytes") or 0)
+        except (TypeError, ValueError):
+            return
+        if total <= 0:
+            return
+        stats.capacity_total = total
+        stats.capacity_used = max(used, 0)
+        stats.capacity_free = max(total - stats.capacity_used, 0)
+        logger.info(
+            "云盘容量：已用 %s / %s，剩余 %s",
+            _human_size(stats.capacity_used),
+            _human_size(stats.capacity_total),
+            _human_size(stats.capacity_free),
+        )
+
+    def _free_capacity(self, stats: SyncStats) -> int | None:
+        if stats.capacity_total <= 0:
+            return None
+        used = stats.capacity_used + stats.bytes_uploaded
+        return max(stats.capacity_total - used, 0)
 
     def _preflight(self, stats: SyncStats) -> None:
         """上传前检查登录态与上传查重接口；失败抛 NcmSyncError。"""
@@ -550,6 +594,25 @@ class Syncer:
             )
             return
 
+        free = self._free_capacity(stats)
+        if free is not None and audio.size > free:
+            stats.failed += 1
+            stats.capacity_insufficient += 1
+            message = (
+                f"云盘剩余空间不足：文件 {_human_size(audio.size)}，"
+                f"剩余 {_human_size(free)}"
+            )
+            self._record(
+                "failed",
+                path=audio.path,
+                name=audio.path.name,
+                size=audio.size,
+                detail=message,
+            )
+            logger.warning("%s: %s", message, audio.path)
+            self.state.mark_failed(audio.path, message)
+            return
+
         self.state.mark_uploading(audio.path)
 
         result: UploadResult = self.client.upload(audio.path, md5=md5)
@@ -669,6 +732,7 @@ class Syncer:
                 getattr(self.client, "last_cloud_song_count", len(cloud)) or len(cloud)
             )
             self._notify("cloud_loaded", {"count": stats.cloud_songs})
+            self._load_capacity(stats)
             logger.info("仅扫描：云盘 %d 首（%d 个不同 MD5）", stats.cloud_songs, len(cloud))
 
             local_md5: dict[str, str] = {}

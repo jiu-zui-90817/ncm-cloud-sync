@@ -96,6 +96,36 @@ def _as_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def parse_cloud_capacity(body: Any) -> dict[str, Any]:
+    """解析云盘列表顶层容量字段（单位：字节）。
+
+    网易云 /api/v1/cloud/get 顶层返回 maxSize（总空间）、size（已用空间）、
+    count（歌曲数）。字段缺失时返回 supported=False，不能把 0 当成已满。
+    """
+    if not isinstance(body, dict):
+        return {
+            "supported": False,
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "free_bytes": 0,
+            "percent": None,
+            "songs": 0,
+        }
+    total = max(_as_int(body.get("maxSize"), 0), 0)
+    used = max(_as_int(body.get("size"), 0), 0)
+    songs = max(_as_int(body.get("count"), 0), 0)
+    free = max(total - used, 0)
+    percent = round(min(used * 100.0 / total, 100.0), 1) if total else None
+    return {
+        "supported": bool(total),
+        "total_bytes": total,
+        "used_bytes": used,
+        "free_bytes": free,
+        "percent": percent,
+        "songs": songs,
+    }
+
+
 def _normalize_nos_host(value: Any) -> str:
     """把 LBS 返回的节点（可能带 http:// 或路径）规范化成 host。"""
     text = str(value or "").strip()
@@ -147,6 +177,7 @@ class CloudClient:
         self._nos_host_at = 0.0
         self._device_ip: str | None = None
         self.last_cloud_song_count = 0
+        self.last_cloud_capacity: dict[str, Any] = {}
         self._throttle_lock = threading.Lock()
         self._last_request_at = 0.0
         self._http = httpx.Client(
@@ -579,6 +610,9 @@ class CloudClient:
             data = body.get("data") or []
             if not isinstance(data, list):
                 raise ApiError("云盘列表返回格式异常", url=BASE_URL + "/api/v1/cloud/get")
+            capacity = parse_cloud_capacity(body)
+            if capacity["supported"]:
+                self.last_cloud_capacity = capacity
             songs.extend(item for item in data if isinstance(item, dict))
             count = _as_int(body.get("count"), 0)
             offset += len(data)
@@ -587,6 +621,21 @@ class CloudClient:
             if count and offset >= count:
                 break
         return songs
+
+    def cloud_capacity(self) -> dict[str, Any]:
+        """读取云盘容量；只请求一页，不拉取全部歌曲。"""
+        body = self._weapi(
+            "/api/v1/cloud/get",
+            {"limit": 1, "offset": 0},
+        )
+        data = body.get("data") or []
+        if not isinstance(data, list):
+            raise ApiError("云盘列表返回格式异常", url=BASE_URL + "/api/v1/cloud/get")
+        capacity = parse_cloud_capacity(body)
+        if not capacity["songs"]:
+            capacity["songs"] = len(data)
+        self.last_cloud_capacity = capacity
+        return capacity
 
     def cloud_song_md5_map(self) -> dict[str, int]:
         """云盘已有内容：md5 -> songId，用于同步前对账。

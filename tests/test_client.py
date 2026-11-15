@@ -41,6 +41,43 @@ def test_check_upload_payload() -> None:
     assert payload["md5"] == "abc"
 
 
+def test_cloud_capacity_reads_top_level_fields() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
+        return {
+            "code": 200,
+            "maxSize": "1073741824",
+            "size": "268435456",
+            "count": 12,
+            "data": [{"songId": 1}],
+        }
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    capacity = client.cloud_capacity()
+
+    assert calls[0][0] == "/api/v1/cloud/get"
+    assert calls[0][1] == {"limit": 1, "offset": 0}
+    assert capacity["supported"] is True
+    assert capacity["total_bytes"] == 1073741824
+    assert capacity["used_bytes"] == 268435456
+    assert capacity["free_bytes"] == 805306368
+    assert capacity["percent"] == 25.0
+    assert capacity["songs"] == 12
+    assert client.last_cloud_capacity == capacity
+
+
+def test_cloud_capacity_unknown_when_fields_missing() -> None:
+    client = make_client()
+    client._weapi = lambda *a, **k: {"code": 200, "data": []}  # type: ignore[method-assign]
+    capacity = client.cloud_capacity()
+    assert capacity["supported"] is False
+    assert capacity["total_bytes"] == 0
+    assert capacity["percent"] is None
+
+
 def test_check_upload_keeps_zero_song_id() -> None:
     client = make_client()
     client._eapi_api = lambda *a, **k: {"needUpload": True, "songId": 0}  # type: ignore[method-assign]

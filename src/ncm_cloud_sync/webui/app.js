@@ -18,6 +18,8 @@
     updateLoaded: false,
     updateLoading: false,
     updateInfo: null,
+    capacityLoaded: false,
+    capacityLoading: false,
     runDetail: { runId: null, kind: "all", items: [], total: 0, offset: 0, limit: 200, loading: false, run: null, counts: {} }
   };
 
@@ -238,6 +240,56 @@
     return (size / 1024 / 1024 / 1024).toFixed(2) + " GB";
   }
 
+  function renderCapacity(data) {
+    var capacity = data && data.capacity ? data.capacity : data;
+    var text = el("capacityText");
+    var hint = el("capacityHint");
+    var fill = el("capacityFill");
+    if (!capacity || !capacity.supported || Number(capacity.total_bytes || 0) <= 0) {
+      text.textContent = "暂不可用";
+      hint.textContent = "网易云没有返回容量数据，可能是账号不支持或接口调整。";
+      fill.className = "capacity-fill";
+      fill.style.width = "0%";
+      fill.parentNode.setAttribute("aria-valuenow", "0");
+      return;
+    }
+    var total = Number(capacity.total_bytes) || 0;
+    var used = Number(capacity.used_bytes) || 0;
+    var free = Number(capacity.free_bytes) || 0;
+    var percent = Number(capacity.percent);
+    if (isNaN(percent)) {
+      percent = total > 0 ? Math.min(used * 100 / total, 100) : 0;
+    }
+    percent = Math.max(0, Math.min(percent, 100));
+    text.textContent = formatBytes(used) + " / " + formatBytes(total);
+    hint.textContent = "剩余 " + formatBytes(free) + " · 已用 " + percent.toFixed(1) + "%";
+    fill.className = "capacity-fill" + (percent >= 90 ? " danger" : percent >= 75 ? " warn" : "");
+    fill.style.width = percent.toFixed(1) + "%";
+    fill.parentNode.setAttribute("aria-valuenow", percent.toFixed(1));
+  }
+
+  function loadCapacity(silent) {
+    if (state.capacityLoading) {
+      return;
+    }
+    state.capacityLoading = true;
+    api("/api/capacity").then(function (data) {
+      state.capacityLoaded = true;
+      renderCapacity(data);
+    }).catch(function (error) {
+      state.capacityLoaded = true;
+      el("capacityText").textContent = "读取失败";
+      el("capacityHint").textContent = error.message;
+      el("capacityFill").className = "capacity-fill";
+      el("capacityFill").style.width = "0%";
+      if (!silent) {
+        showToast(error.message, true);
+      }
+    }).finally(function () {
+      state.capacityLoading = false;
+    });
+  }
+
   function syncStateLabel(value) {
     var labels = {
       idle: "空闲",
@@ -456,7 +508,11 @@
     el("loginCard").classList.toggle("hidden", Boolean(data.logged_in));
     el("dashboard").classList.toggle("hidden", !data.logged_in);
     if (!data.logged_in) {
+      state.capacityLoaded = false;
       return;
+    }
+    if (!state.capacityLoaded) {
+      loadCapacity(true);
     }
     el("nickname").textContent = (data.account && data.account.nickname) || "网易云用户";
     el("userId").textContent = (data.account && data.account.userId)
@@ -1380,6 +1436,7 @@
     api("/api/account/refresh", { method: "POST" }).then(function () {
       showToast("账号信息已刷新");
       loadStatus(false);
+      loadCapacity(true);
     }).catch(function (error) {
       showToast(error.message, true);
     });
