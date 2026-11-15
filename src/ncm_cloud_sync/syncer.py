@@ -57,6 +57,7 @@ class SyncStats:
     deferred: int = 0
     ignored: int = 0
     missing: int = 0
+    moved: int = 0
     bytes_uploaded: int = 0
     capacity_total: int = 0
     capacity_used: int = 0
@@ -127,8 +128,9 @@ class SyncStats:
             + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
             + (f"，忽略 {self.ignored}" if self.ignored else "")
             + (f"，扫描过滤 {self.filtered}" if self.filtered else "")
-            + f"，缺失 {self.missing}，"
-            f"上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
+            + f"，缺失 {self.missing}"
+            + (f"，已移动 {self.moved}" if self.moved else "")
+            + f"，上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
             + (
                 f"；已终止，剩余 {self.deferred} 首待下次"
@@ -207,6 +209,7 @@ class Syncer:
             or stats.linked
             or stats.failed
             or stats.missing
+            or stats.moved
             or stats.deferred
         )
 
@@ -915,10 +918,11 @@ class Syncer:
             if (
                 known_record is not None
                 and known_record.md5
-                and known_record.status in {"uploaded", "skipped_local", "skipped_remote"}
+                and known_record.status
+                in {"uploaded", "skipped_local", "skipped_remote", "up_to_date"}
             ):
                 known_md5.setdefault(str(known_record.md5), known_path)
-        for record in list(self.state.missing_candidates(known)):
+        for record in list(self.state.missing_candidates(known, include_missing=True)):
             if Path(record.path).exists():
                 continue
             moved_to = known_md5.get(str(record.md5 or ""))
@@ -931,6 +935,10 @@ class Syncer:
                 )
                 logger.info("文件已移动，更新旧记录: %s -> %s", record.path, moved_to)
                 self.state.mark_moved(record.path, moved_to)
+                stats.moved += 1
+                continue
+            if record.status == "missing":
+                # 已经确认缺失的记录不重复计数；保留记录，等文件重新出现。
                 continue
             stats.missing += 1
             self._record(

@@ -531,9 +531,14 @@ class StateStore:
         )
         self.conn.commit()
 
-    def missing_candidates(self, known_paths: set[str]) -> Iterable[FileRecord]:
+    def missing_candidates(
+        self, known_paths: set[str], include_missing: bool = False
+    ) -> Iterable[FileRecord]:
+        statuses = "'uploaded', 'skipped_local', 'skipped_remote'"
+        if include_missing:
+            statuses += ", 'missing'"
         rows = self.conn.execute(
-            "SELECT * FROM files WHERE status IN ('uploaded', 'skipped_local', 'skipped_remote')"
+            f"SELECT * FROM files WHERE status IN ({statuses})"  # noqa: S608
         ).fetchall()
         for row in rows:
             record = FileRecord.from_row(row)

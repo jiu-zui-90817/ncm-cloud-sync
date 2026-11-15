@@ -292,6 +292,31 @@ def test_moved_file_not_marked_missing(tmp_path: Path) -> None:
         assert client.calls == ["a.mp3"]
 
 
+def test_existing_missing_record_is_reconciled_after_move(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    old = music / "a.mp3"
+    new = music / "b.mp3"
+    payload = b"a" * 100
+    old.write_bytes(payload)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        old.unlink()
+        assert Syncer(config, client, state).run_once().missing == 1
+        assert state.get(old).status == "missing"
+
+        client.cloud = {hashlib.md5(payload).hexdigest(): 1}
+        new.write_bytes(payload)
+        stats = Syncer(config, client, state).run_once()
+        assert stats.missing == 0
+        assert stats.moved == 1
+        assert state.get(old).status == "moved"
+        assert state.get(new).status == "skipped_remote"
+        assert client.calls == ["a.mp3"]
+
+
 def test_limit(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()
