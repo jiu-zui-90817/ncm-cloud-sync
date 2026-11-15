@@ -69,6 +69,7 @@ STATIC_FILES = {
     "app.js": ("app.js", "application/javascript; charset=utf-8"),
     "style.css": ("style.css", "text/css; charset=utf-8"),
     "favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "favicon.png": ("favicon.png", "image/png"),
 }
 
 

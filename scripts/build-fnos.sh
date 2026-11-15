@@ -66,7 +66,8 @@ done
 
 # 3. 图标（仓库已提交生成结果；缺失时再用 Pillow 生成）
 if [ ! -f "$APP/ICON.PNG" ] || [ ! -f "$APP/ICON_256.PNG" ] || \
-   [ ! -f "$APP/app/ui/images/icon_64.png" ] || [ ! -f "$APP/app/ui/images/icon_256.png" ]; then
+   [ ! -f "$APP/app/ui/images/icon_64.png" ] || [ ! -f "$APP/app/ui/images/icon_256.png" ] || \
+   [ ! -f "$ROOT/src/wy_music_cloud/webui/favicon.png" ]; then
   "$PYTHON_BIN" "$ROOT/scripts/make_icons.py"
 fi
 

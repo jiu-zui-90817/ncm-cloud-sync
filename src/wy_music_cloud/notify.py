@@ -101,7 +101,7 @@ def _text(value: Any) -> str:
 def normalize_channels(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
-    if not isinstance(value, list):
+    if isinstance(value, (str, bytes, dict)) or not isinstance(value, (list, tuple)):
         raise ValueError("通知渠道必须是列表")
     result: list[dict[str, Any]] = []
     for index, item in enumerate(value):

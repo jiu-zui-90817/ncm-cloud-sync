@@ -359,6 +359,8 @@ def test_static_page_has_about_and_update(tmp_path: Path) -> None:
     assert 'data-page="about"' in html
     assert "checkUpdateButton" in html
     assert "updateNotes" in html
+    assert "favicon.png" in html
+    assert "favicon.svg" not in html
 
 
 def test_stop_current_keeps_auto_sync_enabled(tmp_path: Path, monkeypatch: Any) -> None:

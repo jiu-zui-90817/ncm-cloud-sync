@@ -184,3 +184,26 @@ def test_dingtalk_error_code(monkeypatch: pytest.MonkeyPatch) -> None:
             "标题",
             "内容",
         )
+
+
+def test_normalize_channels_accepts_tuple() -> None:
+    channels = notify.normalize_channels(
+        ({"type": "bark", "config": {"url": "https://api.day.app/abc"}},)
+    )
+    assert channels[0]["type"] == "bark"
+
+
+def test_notify_run_accepts_tuple_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[str] = []
+    monkeypatch.setattr(
+        notify,
+        "send_channel",
+        lambda channel, title, content: sent.append(str(channel["id"])),
+    )
+    results = notify.notify_run(
+        ({"id": "abc", "type": "bark", "config": {"url": "https://api.day.app/abc"}},),
+        "always",
+        SimpleNamespace(),
+    )
+    assert sent == ["abc"]
+    assert results == [{"id": "abc", "type": "bark", "ok": True, "error": ""}]

@@ -6,7 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APPDIR="${TRIM_APPDEST:?缺少 TRIM_APPDEST}"
 VARDIR="${TRIM_PKGVAR:?缺少 TRIM_PKGVAR}"
 mkdir -p "$VARDIR"
-apply_wizard_settings "$APPDIR" "$VARDIR"
+# 覆盖升级不能重置用户设置；只有首次安装或设置文件丢失时才用向导值重建。
+if [ ! -f "$VARDIR/settings.json" ]; then
+  apply_wizard_settings "$APPDIR" "$VARDIR"
+else
+  write_login_hint "$VARDIR" "$APPDIR"
+fi
 
 if [ "$(id -u)" = "0" ] && [ -n "${TRIM_UID:-}" ]; then
   chown -R "${TRIM_UID}:${TRIM_GID:-$TRIM_UID}" "$VARDIR" 2>/dev/null || true

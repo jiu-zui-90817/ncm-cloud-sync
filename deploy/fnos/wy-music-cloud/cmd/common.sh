@@ -2,6 +2,8 @@
 # 原生应用生命周期与启动脚本共用的函数。
 set -euo pipefail
 
+COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 fail() {
   printf "%s\n" "$*" >&2
   if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
@@ -98,7 +100,12 @@ apply_wizard_settings() {
 
   mkdir -p "$vardir/data"
   chmod 700 "$vardir/data" 2>/dev/null || true
-  write_settings "$vardir/settings.json" "$music" "$interval" "$dry_run" "$log_level"
+  local python
+  if python="$(find_python "$appdir" 2>/dev/null)" && [ -n "$python" ]; then
+    "$python" "$COMMON_DIR/settings_merge.py" "$vardir/settings.json" "$music" "$interval" "$dry_run" "$log_level"
+  else
+    write_settings "$vardir/settings.json" "$music" "$interval" "$dry_run" "$log_level"
+  fi
   write_login_hint "$vardir" "$appdir"
 }
 
