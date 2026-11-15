@@ -190,6 +190,26 @@ class Syncer:
             }
         )
 
+    @staticmethod
+    def _keep_run(stats: SyncStats) -> bool:
+        """只保留有实际同步结果或错误的运行记录。"""
+        if stats.error:
+            return True
+        if stats.mode == "scan":
+            return bool(
+                stats.to_upload
+                or stats.failed
+                or stats.cloud_only
+                or stats.duplicate_local
+            )
+        return bool(
+            stats.uploaded
+            or stats.linked
+            or stats.failed
+            or stats.missing
+            or stats.deferred
+        )
+
     def _finish_run(self, run_id: int, stats: SyncStats) -> None:
         self.state.finish_run(
             run_id,
@@ -200,6 +220,7 @@ class Syncer:
             error=stats.error or None,
             stats=stats.as_dict(),
             items=self._items,
+            keep=self._keep_run(stats),
         )
 
     def _notify(self, event: str, payload: dict[str, Any]) -> None:

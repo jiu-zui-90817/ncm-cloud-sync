@@ -197,6 +197,54 @@ class StateStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def file_counts(self) -> dict[str, int]:
+        stats = self.stats()
+        problem_counts = self.problem_counts()
+        return {
+            "uploaded": int(stats.get("uploaded", 0)),
+            "pending": int(stats.get("pending", 0)),
+            "missing": int(stats.get("missing", 0)),
+            "skipped": int(stats.get("skipped_local", 0))
+            + int(stats.get("skipped_remote", 0)),
+            "failed": problem_counts["failed"],
+            "permission": problem_counts["permission"],
+        }
+
+    def file_list(self, kind: str, limit: int = 200) -> dict[str, Any]:
+        limit = max(1, min(int(limit), 500))
+        where = {
+            "uploaded": "status = 'uploaded'",
+            "pending": "status = 'pending'",
+            "missing": "status = 'missing'",
+            "skipped": "status IN ('skipped_local', 'skipped_remote')",
+            "failed": "status = 'failed'",
+        }.get(kind)
+        if where is None:
+            raise ValueError(f"未知的文件类型: {kind}")
+        total = int(
+            self.conn.execute(
+                f"SELECT COUNT(*) AS n FROM files WHERE {where}"  # noqa: S608
+            ).fetchone()["n"]
+        )
+        rows = self.conn.execute(
+            "SELECT path, size, status, song_id, duplicate_of, last_error, updated_at "
+            f"FROM files WHERE {where} ORDER BY updated_at DESC, path LIMIT ?",  # noqa: S608
+            (limit,),
+        ).fetchall()
+        items = []
+        for row in rows:
+            item = dict(row)
+            path = str(item.get("path") or "")
+            item["name"] = path.replace("\\", "/").rsplit("/", 1)[-1] if path else None
+            if item.get("status") == "failed" and "没有读取权限" in str(
+                item.get("last_error") or ""
+            ):
+                item["kind"] = "permission"
+            else:
+                item["kind"] = item.get("status")
+            items.append(item)
+        return {"kind": kind, "total": total, "items": items}
+
     def reset_problems(self, kind: str = "failed") -> int:
         if kind == "permission":
             where = "status = 'failed' AND last_error LIKE '%没有读取权限%'"
@@ -417,7 +465,13 @@ class StateStore:
         error: str | None = None,
         stats: dict[str, Any] | None = None,
         items: list[dict[str, Any]] | None = None,
+        keep: bool = True,
     ) -> None:
+        if not keep:
+            self.conn.execute("DELETE FROM run_items WHERE run_id = ?", (run_id,))
+            self.conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            self.conn.commit()
+            return
         stats_json = json.dumps(stats, ensure_ascii=False) if stats is not None else None
         self.conn.execute(
             """

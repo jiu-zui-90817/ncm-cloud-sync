@@ -20,7 +20,8 @@
     updateInfo: null,
     capacityLoaded: false,
     capacityLoading: false,
-    runDetail: { runId: null, kind: "all", items: [], total: 0, offset: 0, limit: 200, loading: false, run: null, counts: {} }
+    runDetail: { runId: null, kind: "all", items: [], total: 0, offset: 0, limit: 200, loading: false, run: null, counts: {} },
+    fileDetail: { kind: null, items: [], total: 0, loading: false, source: null, finishedAt: null, counts: {} }
   };
 
   var FIELD_LABELS = {
@@ -1189,7 +1190,8 @@
     deferred: "待续",
     to_upload: "待上传",
     cloud_only: "云端独有",
-    duplicate_local: "本地重复"
+    duplicate_local: "本地重复",
+    pending: "待处理"
   };
 
   function runKindLabel(kind) {
@@ -1357,6 +1359,141 @@
     }
   }
 
+
+  var FILE_KIND_LABELS = {
+    uploaded: "已上传",
+    pending: "待处理",
+    missing: "本地缺失",
+    skipped: "跳过/重复"
+  };
+
+  function fileKindLabel(kind) {
+    return FILE_KIND_LABELS[kind] || "文件";
+  }
+
+  function fileDetailText(item) {
+    if (item.status === "uploaded") {
+      return "上传成功";
+    }
+    if (item.status === "pending") {
+      return "等待下次同步上传";
+    }
+    if (item.status === "missing") {
+      return "本地文件已不存在";
+    }
+    if (item.status === "skipped_local") {
+      return "与本地其他文件内容重复";
+    }
+    if (item.status === "skipped_remote") {
+      return "云端已有相同文件";
+    }
+    return item.last_error || "";
+  }
+
+  function openFileDetail(kind) {
+    state.fileDetail = {
+      kind: kind,
+      items: [],
+      total: 0,
+      loading: false,
+      source: null,
+      finishedAt: null,
+      counts: {}
+    };
+    el("fileDetailTitle").textContent = fileKindLabel(kind) + "明细";
+    el("fileDetailSummary").textContent = "正在读取文件明细…";
+    el("fileDetailList").textContent = "";
+    el("fileDetailModal").classList.remove("hidden");
+    document.body.classList.add("modal-open");
+    loadFileDetail();
+  }
+
+  function closeFileDetail() {
+    el("fileDetailModal").classList.add("hidden");
+    document.body.classList.remove("modal-open");
+    state.fileDetail.kind = null;
+  }
+
+  function loadFileDetail() {
+    var detail = state.fileDetail;
+    if (detail.loading || !detail.kind) {
+      return;
+    }
+    detail.loading = true;
+    api("/api/files?kind=" + encodeURIComponent(detail.kind) + "&limit=500").then(function (data) {
+      detail.loading = false;
+      detail.items = data.items || [];
+      detail.total = data.total || 0;
+      detail.source = data.source || null;
+      detail.finishedAt = data.finished_at || null;
+      detail.counts = data.counts || {};
+      renderFileDetail();
+    }).catch(function (error) {
+      detail.loading = false;
+      el("fileDetailSummary").textContent = error.message;
+      showToast(error.message, true);
+    });
+  }
+
+  function renderFileDetail() {
+    var detail = state.fileDetail;
+    var summary = "共 " + detail.total + " 个";
+    if (detail.source === "scan" && detail.finishedAt) {
+      summary += " · 来自 " + formatRunTime(detail.finishedAt) + " 的仅扫描";
+    }
+    if (detail.items.length < detail.total) {
+      summary += " · 显示前 " + detail.items.length + " 个";
+    }
+    el("fileDetailSummary").textContent = summary;
+    var list = el("fileDetailList");
+    list.textContent = "";
+    if (!detail.items.length) {
+      var empty = document.createElement("li");
+      empty.className = "run-empty";
+      empty.textContent = "该分类下没有文件";
+      list.appendChild(empty);
+      return;
+    }
+    detail.items.forEach(function (item) {
+      var row = document.createElement("li");
+      row.className = "run-item";
+      var head = document.createElement("div");
+      head.className = "run-item-head";
+      var name = document.createElement("strong");
+      name.textContent = item.name || (item.path ? basename(item.path) : "未知文件");
+      var kind = document.createElement("span");
+      kind.className = "run-item-kind kind-" + (item.kind || "pending");
+      kind.textContent = runKindLabel(item.kind);
+      head.appendChild(name);
+      head.appendChild(kind);
+      row.appendChild(head);
+      var detailText = fileDetailText(item);
+      if (detailText) {
+        var note = document.createElement("p");
+        note.className = "run-item-detail";
+        note.textContent = detailText;
+        row.appendChild(note);
+      }
+      var meta = [];
+      if (item.size) {
+        meta.push(formatBytes(item.size));
+      }
+      if (item.path) {
+        meta.push(item.path);
+      }
+      if (item.song_id) {
+        meta.push("歌曲 ID " + item.song_id);
+      }
+      if (meta.length) {
+        var metaText = document.createElement("p");
+        metaText.className = "run-item-path";
+        metaText.textContent = meta.join(" · ");
+        row.appendChild(metaText);
+      }
+      list.appendChild(row);
+    });
+  }
+
   function syncAction(path, message) {
     api(path, { method: "POST" }).then(function () {
       showToast(message);
@@ -1442,6 +1579,18 @@
     });
   }
 
+  function bindFileEntry(node) {
+    node.addEventListener("click", function () {
+      openFileDetail(node.getAttribute("data-file-kind"));
+    });
+    node.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        node.click();
+      }
+    });
+  }
+
   function bindProblemEntry(node) {
     node.addEventListener("click", function () {
       state.problemKind = node.getAttribute("data-problem-kind") || "all";
@@ -1478,7 +1627,18 @@
         closeRunDetail();
       }
     });
+    el("fileDetailClose").addEventListener("click", closeFileDetail);
+    el("fileDetailRefresh").addEventListener("click", loadFileDetail);
+    el("fileDetailModal").addEventListener("click", function (event) {
+      if (event.target === el("fileDetailModal")) {
+        closeFileDetail();
+      }
+    });
     document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && !el("fileDetailModal").classList.contains("hidden")) {
+        closeFileDetail();
+        return;
+      }
       if (event.key === "Escape" && !el("runDetailModal").classList.contains("hidden")) {
         closeRunDetail();
       }
@@ -1515,7 +1675,11 @@
       item.addEventListener("click", function () { loadProblems(item.getAttribute("data-problem-kind"), false); });
     });
     Array.prototype.forEach.call(document.querySelectorAll(".stat.clickable"), function (item) {
-      bindProblemEntry(item);
+      if (item.getAttribute("data-file-kind")) {
+        bindFileEntry(item);
+      } else {
+        bindProblemEntry(item);
+      }
     });
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden) {

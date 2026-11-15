@@ -101,11 +101,11 @@
         </section>
 
         <section class="stats-grid">
-          <article class="stat"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
-          <article class="stat"><span class="stat-label">待处理</span><strong id="statPending">0</strong><small id="statPendingHint" class="stat-hint hidden"></small></article>
+          <article class="stat clickable" data-file-kind="uploaded" tabindex="0" role="button" title="查看已上传文件"><span class="stat-label">已上传</span><strong id="statUploaded">0</strong></article>
+          <article class="stat clickable" data-file-kind="pending" tabindex="0" role="button" title="查看待处理文件"><span class="stat-label">待处理</span><strong id="statPending">0</strong><small id="statPendingHint" class="stat-hint hidden"></small></article>
           <article class="stat clickable" data-problem-kind="all" tabindex="0" role="button" title="查看失败和无权限文件"><span class="stat-label">问题文件</span><strong id="statProblems">0</strong><small class="stat-link" id="statProblemBreakdown">失败 0 · 无权限 0</small></article>
-          <article class="stat"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
-          <article class="stat"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
+          <article class="stat clickable" data-file-kind="missing" tabindex="0" role="button" title="查看本地缺失文件"><span class="stat-label">本地缺失</span><strong id="statMissing">0</strong></article>
+          <article class="stat clickable" data-file-kind="skipped" tabindex="0" role="button" title="查看跳过和重复文件"><span class="stat-label">跳过/重复</span><strong id="statSkipped">0</strong></article>
         </section>
 
         <section class="card">
@@ -333,6 +333,22 @@
       <div class="actions run-detail-actions">
         <button id="runDetailMore" class="btn ghost hidden" type="button">加载更多</button>
       </div>
+    </div>
+  </div>
+
+  <div id="fileDetailModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="fileDetailTitle">
+    <div class="modal-panel">
+      <div class="card-head">
+        <div>
+          <h2 id="fileDetailTitle">文件明细</h2>
+          <p id="fileDetailSummary" class="muted">加载中…</p>
+        </div>
+        <div class="actions">
+          <button id="fileDetailRefresh" class="btn ghost" type="button">刷新</button>
+          <button id="fileDetailClose" class="btn ghost" type="button">关闭</button>
+        </div>
+      </div>
+      <ul id="fileDetailList" class="run-item-list"></ul>
     </div>
   </div>
 

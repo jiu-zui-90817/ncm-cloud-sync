@@ -66,6 +66,43 @@ def test_runs_keep_only_recent_five(tmp_path: Path) -> None:
         assert [run["uploaded"] for run in runs] == [5, 4, 3, 2, 1]
 
 
+def test_file_list_and_counts(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        state.mark_seen("uploaded.mp3", 100, 1)
+        state.mark_uploaded("uploaded.mp3", song_id=1, cloud_name="uploaded")
+        state.mark_seen("pending.mp3", 100, 1)
+        state.mark_seen("missing.mp3", 100, 1)
+        state.mark_missing("missing.mp3")
+        state.mark_seen("local.mp3", 100, 1)
+        state.mark_skipped("local.mp3", status="skipped_local")
+        state.mark_seen("remote.mp3", 100, 1)
+        state.mark_skipped("remote.mp3", status="skipped_remote")
+        state.mark_seen("denied.mp3", 100, 1)
+        state.mark_failed("denied.mp3", "读取文件失败：没有读取权限")
+
+        counts = state.file_counts()
+        assert counts["uploaded"] == 1
+        assert counts["pending"] == 1
+        assert counts["missing"] == 1
+        assert counts["skipped"] == 2
+        assert counts["permission"] == 1
+
+        uploaded = state.file_list("uploaded")
+        assert uploaded["total"] == 1
+        assert uploaded["items"][0]["name"] == "uploaded.mp3"
+        skipped = state.file_list("skipped")
+        assert skipped["total"] == 2
+        permission = state.file_list("failed")
+        assert permission["items"][0]["kind"] == "permission"
+
+
+def test_finish_run_can_discard_noop_run(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        run_id = state.start_run()
+        state.finish_run(run_id, scanned=3, skipped=3, keep=False)
+        assert state.recent_runs(10) == []
+
+
 def test_problem_counts_files_and_reset(tmp_path: Path) -> None:
     with StateStore(tmp_path / "state.db") as state:
         state.mark_seen("ok.mp3", 100, 1)

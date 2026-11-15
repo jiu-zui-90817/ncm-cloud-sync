@@ -81,6 +81,8 @@ def test_upload_then_up_to_date(tmp_path: Path) -> None:
         assert second.uploaded == 0
         assert second.up_to_date == 1
         assert len(client.calls) == 1
+        # 第二次没有任何同步动作，不保留空的运行记录
+        assert len(state.recent_runs(10)) == 1
 
 
 def test_local_duplicate_skipped(tmp_path: Path) -> None:

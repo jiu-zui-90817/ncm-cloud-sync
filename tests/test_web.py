@@ -654,6 +654,37 @@ def test_runs_api_and_status(tmp_path: Path) -> None:
     assert len(data["runs"]) == 1
 
 
+def test_files_api_lists_statuses_and_scan_pending(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        state.mark_seen("uploaded.mp3", 100, 1)
+        state.mark_uploaded("uploaded.mp3", song_id=1, cloud_name="uploaded")
+        state.mark_seen("pending.mp3", 100, 1)
+        run_id = state.start_run("scan")
+        state.finish_run(
+            run_id,
+            stats={"mode": "scan", "to_upload": 1},
+            items=[{"kind": "to_upload", "name": "scan.mp3", "detail": "待上传"}],
+        )
+
+    status, _, data = call(app, "/api/files", query="kind=pending")
+    assert status == "200 OK"
+    assert data["source"] == "scan"
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "scan.mp3"
+    assert data["items"][0]["kind"] == "to_upload"
+    assert data["counts"]["uploaded"] == 1
+    assert data["counts"]["pending"] == 1
+
+    status, _, data = call(app, "/api/files", query="kind=uploaded")
+    assert status == "200 OK"
+    assert data["total"] == 1
+    assert data["items"][0]["name"] == "uploaded.mp3"
+
+    status, _, data = call(app, "/api/files", query="kind=nope")
+    assert status == "400 Bad Request"
+
+
 def test_permissions_check_api(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     (app.config.music_dirs[0] / "a.mp3").write_bytes(b"a")
@@ -767,6 +798,8 @@ def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     assert "copyDiagnosticsButton" in html
     assert "statProblems" in html
     assert "statProblemBreakdown" in html
+    assert "fileDetailModal" in html
+    assert 'data-file-kind="uploaded"' in html
     assert "rateLimit" in html
     assert "excludeDirs" in html
     assert "pauseButton" in html

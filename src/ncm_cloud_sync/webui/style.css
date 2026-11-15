@@ -1255,9 +1255,21 @@ body.modal-open {
 }
 
 .run-item-kind.kind-cloud_only,
-.run-item-kind.kind-to_upload {
+.run-item-kind.kind-to_upload,
+.run-item-kind.kind-pending {
   background: rgba(37, 99, 235, 0.1);
   color: #1d4ed8;
+}
+
+.run-item-kind.kind-missing {
+  background: rgba(180, 83, 9, 0.12);
+  color: #b45309;
+}
+
+.run-item-kind.kind-skipped_remote,
+.run-item-kind.kind-skipped_local {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--muted, #667085);
 }
 
 .run-item-detail,

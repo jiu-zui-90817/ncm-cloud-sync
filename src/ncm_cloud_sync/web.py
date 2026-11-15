@@ -881,6 +881,41 @@ class WebApp:
                 )
             if path == "/api/sync/status" and method == "GET":
                 return self._json(start_response, "200 OK", self.sync.status())
+            if path == "/api/files" and method == "GET":
+                query = parse_qs(str(environ.get("QUERY_STRING") or ""))
+                kind = str((query.get("kind") or ["uploaded"])[0] or "uploaded")
+                limit = _as_int((query.get("limit") or ["200"])[0], 200, 1, 500)
+                with StateStore(self.config.db_path) as state:
+                    result = state.file_list(kind=kind, limit=limit)
+                    counts = state.file_counts()
+                    if kind == "pending":
+                        latest = state.recent_runs(1)
+                        if latest and latest[0].get("mode") == "scan":
+                            detail = state.run_detail(
+                                int(latest[0]["id"]), kind="to_upload", limit=limit
+                            )
+                            if detail is not None:
+                                finished = latest[0].get("finished_at")
+                                items = []
+                                for item in detail["items"]:
+                                    entry = dict(item)
+                                    entry["kind"] = "to_upload"
+                                    entry["status"] = "pending"
+                                    entry["updated_at"] = finished
+                                    items.append(entry)
+                                result = {
+                                    "kind": "pending",
+                                    "source": "scan",
+                                    "run_id": latest[0].get("id"),
+                                    "finished_at": finished,
+                                    "total": detail["total"],
+                                    "items": items,
+                                }
+                return self._json(
+                    start_response,
+                    "200 OK",
+                    {"kind": kind, "counts": counts, **result},
+                )
             if path == "/api/problems" and method == "GET":
                 query = parse_qs(str(environ.get("QUERY_STRING") or ""))
                 kind = str((query.get("kind") or ["all"])[0] or "all")
