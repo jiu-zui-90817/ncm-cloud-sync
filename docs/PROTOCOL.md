@@ -132,7 +132,13 @@ weapi 明文：
 GET https://wanproxy.127.net/lbs?version=1.0&bucketname=jd-musicrep-privatecloud-audio-public
 ```
 
-返回 `data.upload[0]`，取其中的 host。
+实际返回形如：
+
+```json
+{"lbs":"https://wanproxy.127.net/lbs","upload":["http://nosup-jd1.127.net"]}
+```
+
+取顶层 `upload[0]`，并兼容旧版 `data.upload[0].host`。0.2.11 起先试 HTTPS，失败再试 HTTP；LBS 都不通时依次探测 `nosup-jd1.127.net`、`nosup-hz1.127.net`。仍失败则抛 `NosUnavailableError` 并暂停整轮，而不是给每个文件打印一次 traceback。
 
 > 旧代码里硬编码的 `http://45.127.129.8` 已过时；现在用 LBS 返回的节点。参考 [NeteaseCloudMusicApi#1851](https://github.com/Binaryify/NeteaseCloudMusicApi/pull/1851)。
 

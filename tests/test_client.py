@@ -12,8 +12,8 @@ from Crypto.Cipher import AES
 
 import wy_music_cloud.client as client_module
 from wy_music_cloud.crypto import EAPI_KEY
-from wy_music_cloud.client import CloudClient, NOS_BUCKET
-from wy_music_cloud.errors import ApiError, AuthError, RateLimitError
+from wy_music_cloud.client import CloudClient, NOS_BUCKET, parse_nos_host
+from wy_music_cloud.errors import ApiError, AuthError, NosUnavailableError, RateLimitError
 
 
 def make_client(**kwargs) -> CloudClient:
@@ -198,6 +198,58 @@ def test_cloud_songs_pagination() -> None:
     client._weapi = fake_weapi  # type: ignore[method-assign]
     songs = client.cloud_songs(page_size=2)
     assert [song["songId"] for song in songs] == [1, 2, 3]
+
+
+def test_parse_nos_host_accepts_top_level_upload_urls() -> None:
+    body = {"lbs": "https://wanproxy.127.net/lbs", "upload": ["http://nosup-jd1.127.net"]}
+    assert parse_nos_host(body) == "nosup-jd1.127.net"
+
+
+def test_parse_nos_host_accepts_legacy_data_upload() -> None:
+    body = {"data": {"upload": [{"host": "http://nosup-hz1.127.net"}]}}
+    assert parse_nos_host(body) == "nosup-hz1.127.net"
+
+
+def test_get_nos_host_falls_back_to_http_lbs() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if request.url.scheme == "https":
+            raise httpx.ConnectError("Connection refused", request=request)
+        return httpx.Response(
+            200,
+            json={"lbs": "https://wanproxy.127.net/lbs", "upload": ["http://nosup-jd1.127.net"]},
+        )
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    assert client._get_nos_host() == "nosup-jd1.127.net"
+    assert seen[0].startswith("https://")
+    assert seen[1].startswith("http://")
+
+
+def test_get_nos_host_uses_direct_host_when_lbs_fails() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method + " " + str(request.url))
+        if request.method == "HEAD":
+            return httpx.Response(403)
+        raise httpx.ConnectError("Connection refused", request=request)
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    assert client._get_nos_host() == "nosup-jd1.127.net"
+    assert any(item.startswith("HEAD http://nosup-jd1.127.net/") for item in seen)
+
+
+def test_get_nos_host_raises_clear_error_when_all_fail() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused", request=request)
+
+    client = CloudClient({}, transport=httpx.MockTransport(handler), retries=0)
+    with pytest.raises(NosUnavailableError) as exc_info:
+        client._get_nos_host()
+    assert "无法获取网易云上传节点" in str(exc_info.value)
 
 
 def test_nos_upload_url_and_headers(tmp_path: Path, monkeypatch) -> None:

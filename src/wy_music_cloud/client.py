@@ -16,13 +16,13 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
 from .cookies import cookie_header, ensure_defaults
 from .crypto import anonymous_username, encrypt_eapi, encrypt_weapi
-from .errors import ApiError, AuthError, RateLimitError, UploadError
+from .errors import ApiError, AuthError, NosUnavailableError, RateLimitError, UploadError
 from .hashing import file_md5
 from .metadata import display_album, display_artist, read_tags, sanitize_filename
 
@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://music.163.com"
 NOS_BUCKET = "jd-musicrep-privatecloud-audio-public"
-NOS_LBS_URL = "https://wanproxy.127.net/lbs?version=1.0&bucketname=" + NOS_BUCKET
+NOS_LBS_URLS = (
+    "https://wanproxy.127.net/lbs?version=1.0&bucketname=" + NOS_BUCKET,
+    "http://wanproxy.127.net/lbs?version=1.0&bucketname=" + NOS_BUCKET,
+)
+NOS_FALLBACK_HOSTS = ("nosup-jd1.127.net", "nosup-hz1.127.net")
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -72,6 +76,40 @@ def _as_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_nos_host(value: Any) -> str:
+    """把 LBS 返回的节点（可能带 http:// 或路径）规范化成 host。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = "http://" + text
+    parsed = urlparse(text)
+    return (parsed.netloc or parsed.path).strip().strip("/")
+
+
+def parse_nos_host(body: Any) -> str:
+    """兼容 LBS 的两种返回：顶层 upload 字符串列表，或 data.upload 对象列表。"""
+    if not isinstance(body, dict):
+        return ""
+    containers: list[Any] = [body]
+    data = body.get("data")
+    if isinstance(data, dict):
+        containers.append(data)
+    for container in containers:
+        for key in ("upload", "hosts", "nodes"):
+            group = container.get(key)
+            items = group if isinstance(group, (list, tuple)) else [group]
+            for item in items:
+                if isinstance(item, dict):
+                    candidate = item.get("host") or item.get("url") or item.get("domain")
+                else:
+                    candidate = item
+                host = _normalize_nos_host(candidate)
+                if host:
+                    return host
+    return ""
 
 
 class CloudClient:
@@ -484,15 +522,45 @@ class CloudClient:
         now = time.time()
         if self._nos_host and now - self._nos_host_at < 300:
             return self._nos_host
-        response = self._http.get(NOS_LBS_URL, headers=self._headers())
-        response.raise_for_status()
-        body = response.json()
-        upload_list = (body.get("data") or {}).get("upload") or []
-        if not upload_list or not upload_list[0].get("host"):
-            raise UploadError(f"NOS 上传节点获取失败: {body}")
-        self._nos_host = str(upload_list[0]["host"])
-        self._nos_host_at = now
-        return self._nos_host
+        headers = {"User-Agent": USER_AGENT, "Referer": BASE_URL}
+        failures: list[str] = []
+        for url in NOS_LBS_URLS:
+            try:
+                response = self._http.get(url, headers=headers, timeout=15.0)
+                response.raise_for_status()
+                body = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                failures.append(f"{url}: {type(exc).__name__}: {exc}")
+                logger.warning("获取 NOS 上传节点失败，尝试下一个地址: %s (%s)", url, exc)
+                continue
+            host = parse_nos_host(body)
+            if host:
+                self._nos_host = host
+                self._nos_host_at = now
+                logger.info("NOS 上传节点: %s", host)
+                return host
+            failures.append(f"{url}: 响应中没有 upload 节点: {body}")
+            logger.warning("NOS 上传节点响应异常: %s", body)
+        for host in NOS_FALLBACK_HOSTS:
+            if self._nos_host_reachable(host):
+                logger.warning("LBS 不可用，改用固定 NOS 上传节点: %s", host)
+                self._nos_host = host
+                self._nos_host_at = now
+                return host
+            failures.append(f"{host}: 连接失败")
+        raise NosUnavailableError("无法获取网易云上传节点；" + "；".join(failures))
+
+    def _nos_host_reachable(self, host: str) -> bool:
+        try:
+            self._http.head(
+                f"http://{host}/",
+                headers={"User-Agent": USER_AGENT, "Referer": BASE_URL},
+                timeout=8.0,
+            )
+            return True
+        except httpx.HTTPError as exc:
+            logger.warning("固定 NOS 节点不可用: %s (%s)", host, exc)
+            return False
 
     def upload_to_nos(self, token: dict[str, Any], path: str | Path, md5: str, ext: str) -> None:
         object_key = str(token["objectKey"])

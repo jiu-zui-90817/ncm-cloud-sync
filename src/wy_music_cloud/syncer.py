@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from .client import CloudClient, UploadResult
 from .config import Config
-from .errors import AuthError, RateLimitError
+from .errors import AuthError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
 from .scanner import AudioFile, scan
 from .state import StateStore
@@ -129,6 +129,20 @@ class Syncer:
                     stats.deferred = max(0, len(files) - processed + 1)
                     stats.error = f"网易云限流：{exc}。本次同步已暂停，稍后会自动继续。"
                     logger.warning("触发网易云限流，本次同步暂停: %s", exc)
+                    if not self.dry_run:
+                        try:
+                            self.state.mark_pending(audio.path, str(exc))
+                        except Exception:
+                            logger.exception("写入待处理状态时出错: %s", audio.path)
+                    break
+                except NosUnavailableError as exc:
+                    stats.aborted = True
+                    stats.deferred = max(0, len(files) - processed + 1)
+                    stats.error = (
+                        f"无法连接网易云上传节点：{exc}。"
+                        "本次同步已暂停，请检查 NAS 网络后重试。"
+                    )
+                    logger.warning("无法连接网易云上传节点，本次同步暂停: %s", exc)
                     if not self.dry_run:
                         try:
                             self.state.mark_pending(audio.path, str(exc))

@@ -6,7 +6,7 @@ import pytest
 
 from wy_music_cloud.client import UploadResult
 from wy_music_cloud.config import Config
-from wy_music_cloud.errors import RateLimitError, UploadError
+from wy_music_cloud.errors import NosUnavailableError, RateLimitError, UploadError
 from wy_music_cloud.state import StateStore
 from wy_music_cloud.syncer import Syncer
 
@@ -170,6 +170,23 @@ def test_rate_limit_aborts_run(tmp_path: Path) -> None:
         assert stats.failed == 0
         assert stats.deferred == 3
         assert "405" in stats.error
+        assert state.get(music / "a.mp3").status == "pending"
+        assert len(client.calls) == 1
+
+
+def test_nos_unavailable_aborts_run(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    for name in ("a.mp3", "b.mp3", "c.mp3"):
+        (music / name).write_bytes(name.encode())
+    config = make_config(tmp_path, music)
+    client = FakeClient({"a.mp3": NosUnavailableError("无法获取网易云上传节点；连接被拒绝")})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.aborted is True
+        assert stats.failed == 0
+        assert stats.deferred == 3
+        assert "无法连接网易云上传节点" in stats.error
         assert state.get(music / "a.mp3").status == "pending"
         assert len(client.calls) == 1
 

@@ -35,5 +35,9 @@ class UploadError(WyMusicError):
     """上传过程中的网络或协议错误。"""
 
 
+class NosUnavailableError(UploadError):
+    """无法连接网易云 NOS 上传节点，整轮同步应暂停。"""
+
+
 class StateError(WyMusicError):
     """本地状态数据库错误。"""
