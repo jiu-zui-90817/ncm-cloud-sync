@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -97,3 +101,86 @@ def test_webhook_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert captured["url"] == "https://example.com/hook"
     assert captured["json"] == {"title": "标题", "content": "内容", "text": "标题\n\n内容"}
+
+
+def test_dingtalk_signed_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"errcode": 0, "errmsg": "ok"}
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(notify.httpx, "Client", FakeClient)
+    secret = "SECtestsecret"
+    notify.send_channel(
+        {
+            "type": "dingtalk",
+            "name": "钉钉",
+            "config": {
+                "webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=abc",
+                "secret": secret,
+                "at_mobiles": "13800000000,13900000000",
+            },
+        },
+        "同步完成",
+        "上传 2 首",
+    )
+    query = parse_qs(urlparse(str(captured["url"])).query)
+    assert query["access_token"] == ["abc"]
+    timestamp = query["timestamp"][0]
+    expected = base64.b64encode(
+        hmac.new(secret.encode(), f"{timestamp}\n{secret}".encode(), hashlib.sha256).digest()
+    ).decode()
+    assert query["sign"] == [expected]
+    payload = captured["json"]
+    assert payload["msgtype"] == "markdown"
+    assert payload["markdown"]["title"] == "同步完成"
+    assert payload["at"]["atMobiles"] == ["13800000000", "13900000000"]
+
+
+def test_dingtalk_error_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"errcode": 310000, "errmsg": "sign not match"}
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def post(self, url, json=None, headers=None):
+            return FakeResponse()
+
+    monkeypatch.setattr(notify.httpx, "Client", FakeClient)
+    with pytest.raises(RuntimeError, match="310000"):
+        notify.send_channel(
+            {"type": "dingtalk", "config": {"webhook_url": "https://example.com/robot"}},
+            "标题",
+            "内容",
+        )

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import logging
 import smtplib
+import time
 import uuid
 from email.message import EmailMessage
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus
 
 import httpx
 
@@ -21,6 +25,7 @@ ALLOWED_TYPES = (
     "gotify",
     "discord",
     "slack",
+    "dingtalk",
     "serverchan",
     "pushplus",
     "pushover",
@@ -36,6 +41,7 @@ TYPE_LABELS = {
     "gotify": "Gotify",
     "discord": "Discord",
     "slack": "Slack",
+    "dingtalk": "钉钉机器人",
     "serverchan": "Server酱",
     "pushplus": "PushPlus",
     "pushover": "Pushover",
@@ -51,6 +57,7 @@ FIELDS = {
     "gotify": ("server", "token", "priority"),
     "discord": ("webhook_url",),
     "slack": ("webhook_url",),
+    "dingtalk": ("webhook_url", "secret", "at_mobiles"),
     "serverchan": ("sendkey",),
     "pushplus": ("token", "topic"),
     "pushover": ("token", "user"),
@@ -66,6 +73,7 @@ REQUIRED = {
     "gotify": ("server", "token"),
     "discord": ("webhook_url",),
     "slack": ("webhook_url",),
+    "dingtalk": ("webhook_url",),
     "serverchan": ("sendkey",),
     "pushplus": ("token",),
     "pushover": ("token", "user"),
@@ -82,6 +90,7 @@ SECRET_FIELDS = {
     "pushkey",
     "webhook_url",
     "url",
+    "secret",
 }
 
 
@@ -147,10 +156,13 @@ def _check_response(response: httpx.Response, label: str) -> None:
     raise RuntimeError(f"{label} HTTP {response.status_code}: {detail}")
 
 
-def _request_json(url: str, payload: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
+def _request_json(
+    url: str, payload: dict[str, Any], *, headers: dict[str, str] | None = None
+) -> httpx.Response:
     with httpx.Client(timeout=10.0, follow_redirects=True) as client:
         response = client.post(url, json=payload, headers=headers or {})
         _check_response(response, "通知接口")
+        return response
 
 
 def _request_form(url: str, payload: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
@@ -164,6 +176,17 @@ def _url(value: str, label: str) -> str:
     if not (url.startswith("http://") or url.startswith("https://")):
         raise RuntimeError(f"{label} 必须是 http:// 或 https:// 地址")
     return url
+
+
+def _dingtalk_signed_url(url: str, secret: str) -> str:
+    if not secret:
+        return url
+    timestamp = str(int(time.time() * 1000))
+    string_to_sign = f"{timestamp}\n{secret}"
+    digest = hmac.new(secret.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).digest()
+    sign = quote_plus(base64.b64encode(digest).decode("ascii"))
+    joiner = "&" if "?" in url else "?"
+    return f"{url}{joiner}timestamp={timestamp}&sign={sign}"
 
 
 def send_channel(channel: dict[str, Any], title: str, content: str) -> None:
@@ -211,6 +234,29 @@ def send_channel(channel: dict[str, Any], title: str, content: str) -> None:
         return
     if channel_type == "slack":
         _request_json(_url(_text(config.get("webhook_url")), label), {"text": "*" + title + "*\n" + content})
+        return
+    if channel_type == "dingtalk":
+        url = _url(_text(config.get("webhook_url")), label)
+        url = _dingtalk_signed_url(url, _text(config.get("secret")))
+        payload: dict[str, Any] = {
+            "msgtype": "markdown",
+            "markdown": {"title": title, "text": "### " + title + "\n\n" + content},
+        }
+        mobiles = [
+            item.strip()
+            for item in _text(config.get("at_mobiles")).replace(";", ",").split(",")
+            if item.strip()
+        ]
+        if mobiles:
+            payload["at"] = {"atMobiles": mobiles, "isAtAll": False}
+        response = _request_json(url, payload)
+        try:
+            result = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"{label} 返回了无法解析的响应") from exc
+        errcode = int(result.get("errcode") or 0)
+        if errcode:
+            raise RuntimeError(f"{label} 返回错误 {errcode}: {_text(result.get('errmsg'))[:200]}")
         return
     if channel_type == "serverchan":
         key = _text(config.get("sendkey"))

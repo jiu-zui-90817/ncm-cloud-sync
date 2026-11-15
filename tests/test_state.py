@@ -74,3 +74,14 @@ def test_problem_counts_files_and_reset(tmp_path: Path) -> None:
         assert state.reset_problems(kind="permission") == 1
         assert state.problem_counts() == {"failed": 1, "permission": 0}
         assert state.get("denied.mp3").status == "pending"
+
+
+def test_mark_ignored_and_all_paths(tmp_path: Path) -> None:
+    with StateStore(tmp_path / "state.db") as state:
+        state.mark_seen("hidden.mp3", 10, 1)
+        state.mark_ignored("hidden.mp3", "命中排除规则，已隐藏")
+        record = state.get("hidden.mp3")
+        assert record.status == "ignored"
+        assert "排除规则" in record.last_error
+        assert state.stats()["ignored"] == 1
+        assert "hidden.mp3" in state.all_paths()

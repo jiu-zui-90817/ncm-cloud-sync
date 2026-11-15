@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -12,7 +13,7 @@ from .client import CloudClient, UploadResult
 from .config import Config
 from .errors import AuthError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
-from .scanner import AudioFile, scan
+from .scanner import AudioFile, path_is_excluded, scan
 from .state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class SyncStats:
 
     @property
     def skipped(self) -> int:
-        return self.up_to_date + self.skipped_local + self.skipped_remote + self.ignored
+        return self.up_to_date + self.skipped_local + self.skipped_remote
 
     def as_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -56,6 +57,7 @@ class SyncStats:
             f"云端已有 {self.skipped_remote}，未变更 {self.up_to_date}），"
             f"失败 {self.failed}"
             + (f"（其中无权限 {self.permission_denied}）" if self.permission_denied else "")
+            + (f"，忽略 {self.ignored}" if self.ignored else "")
             + f"，缺失 {self.missing}，"
             f"上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
@@ -109,6 +111,37 @@ class Syncer:
     def _paused(self) -> bool:
         return bool(self.pause_event and self.pause_event.is_set())
 
+    def _under_music_dirs(self, path: str | Path) -> bool:
+        key = os.path.normcase(os.path.abspath(str(path)))
+        for root in self.config.music_dirs:
+            root_key = os.path.normcase(os.path.abspath(str(root)))
+            if key == root_key or key.startswith(root_key + os.sep):
+                return True
+        return False
+
+    def _mark_ignored_excluded(self, known: set[str]) -> int:
+        if self.dry_run:
+            return 0
+        count = 0
+        for stored in self.state.all_paths():
+            if stored in known or not self._under_music_dirs(stored):
+                continue
+            if not path_is_excluded(
+                stored,
+                self.config.exclude,
+                self.config.exclude_dirs,
+                self.config.music_dirs,
+            ):
+                continue
+            record = self.state.get(stored)
+            if record is None or record.status == "ignored":
+                continue
+            self.state.mark_ignored(stored, "命中排除规则，已隐藏")
+            count += 1
+        if count:
+            logger.info("已隐藏 %d 个被排除规则命中的历史记录", count)
+        return count
+
     def run_once(self) -> SyncStats:
         started = time.monotonic()
         stats = SyncStats()
@@ -132,6 +165,7 @@ class Syncer:
         logger.info("发现 %d 个候选音频文件", len(files))
         processed = 0
         try:
+            self._mark_ignored_excluded(known)
             for audio in files:
                 if self._stopped():
                     stats.aborted = True
@@ -250,12 +284,18 @@ class Syncer:
 
         if audio.size < self.config.min_size:
             stats.ignored += 1
-            logger.info("文件小于 min_size，跳过: %s", audio.path)
+            reason = f"文件小于 min_size ({self.config.min_size} 字节)，已忽略"
+            logger.info("%s: %s", reason, audio.path)
+            if not self.dry_run:
+                self.state.mark_ignored(audio.path, reason)
             return
 
         if audio.suffix not in self.config.upload_extensions:
             stats.ignored += 1
-            logger.info("扩展名 %s 不在 upload_extensions，跳过: %s", audio.suffix, audio.path)
+            reason = f"扩展名 {audio.suffix} 不在 upload_extensions，已忽略"
+            logger.info("%s: %s", reason, audio.path)
+            if not self.dry_run:
+                self.state.mark_ignored(audio.path, reason)
             return
 
         if self.config.max_upload_size and audio.size > self.config.max_upload_size:

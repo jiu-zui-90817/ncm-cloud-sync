@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wy_music_cloud.scanner import scan
+from wy_music_cloud.scanner import path_is_excluded, scan
 
 
 def test_scan_filters_extension_and_excludes(tmp_path: Path) -> None:
@@ -46,3 +46,16 @@ def test_scan_exclude_outside_music_root_has_no_effect(tmp_path: Path) -> None:
 
     found = list(scan([music], ["mp3"], exclude_dirs=[other]))
     assert {item.path.name for item in found} == {"keep.mp3"}
+
+
+def test_path_is_excluded_matches_components_and_exclude_dirs(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    hidden = music / ".hidden" / "a.mp3"
+    nested = music / "有声书" / "chapter" / "b.mp3"
+    assert path_is_excluded(hidden, [".*"], music_dirs=[music]) is True
+    assert path_is_excluded(nested, [], [music / "有声书"], music_dirs=[music]) is True
+    assert path_is_excluded(music / "normal.mp3", [".*"], music_dirs=[music]) is False
+    hidden_root = tmp_path / ".music"
+    hidden_root.mkdir()
+    assert path_is_excluded(hidden_root / "a.mp3", [".*"], music_dirs=[hidden_root]) is False

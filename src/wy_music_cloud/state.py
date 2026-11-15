@@ -198,6 +198,10 @@ class StateStore:
         ).fetchall()
         return [FileRecord.from_row(row) for row in rows]
 
+    def all_paths(self) -> list[str]:
+        rows = self.conn.execute("SELECT path FROM files").fetchall()
+        return [str(row["path"]) for row in rows]
+
     # -- 写入 -------------------------------------------------------------
     def mark_seen(self, path: str | Path, size: int, mtime_ns: int) -> None:
         now = utc_now()
@@ -292,6 +296,13 @@ class StateStore:
         self.conn.execute(
             "UPDATE files SET status = 'missing', updated_at = ? WHERE path = ?",
             (utc_now(), str(path)),
+        )
+        self.conn.commit()
+
+    def mark_ignored(self, path: str | Path, reason: str = "") -> None:
+        self.conn.execute(
+            "UPDATE files SET status = 'ignored', last_error = ?, updated_at = ? WHERE path = ?",
+            (reason[:2000], utc_now(), str(path)),
         )
         self.conn.commit()
 

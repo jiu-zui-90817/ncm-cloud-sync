@@ -14,7 +14,10 @@
     problemKind: "failed",
     problemCounts: { failed: 0, permission: 0 },
     notifyTypes: [],
-    notifications: []
+    notifications: [],
+    updateLoaded: false,
+    updateLoading: false,
+    updateInfo: null
   };
 
   var FIELD_LABELS = {
@@ -26,6 +29,8 @@
     server: "服务器地址",
     topic: "主题 / Topic",
     token: "Token",
+    secret: "加签密钥（可选）",
+    at_mobiles: "被 @ 手机号（可选，逗号分隔）",
     priority: "优先级（可选）",
     webhook_url: "Webhook 地址",
     sendkey: "SendKey",
@@ -333,7 +338,7 @@
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (item) {
       item.classList.toggle("active", item.getAttribute("data-page") === name);
     });
-    ["overview", "problems", "settings", "notifications", "logs"].forEach(function (page) {
+    ["overview", "problems", "settings", "notifications", "about", "logs"].forEach(function (page) {
       var node = el("page-" + page);
       if (node) {
         node.classList.toggle("hidden", page !== name);
@@ -345,6 +350,8 @@
       loadLogs();
     } else if (name === "notifications") {
       renderNotifications();
+    } else if (name === "about") {
+      loadUpdate(false);
     }
   }
 
@@ -413,6 +420,54 @@
     }).catch(function (error) {
       el("problemStatus").textContent = error.message;
       showToast(error.message, true);
+    });
+  }
+
+  function renderUpdate(data) {
+    state.updateInfo = data;
+    var current = data.current || "";
+    var latest = data.latest || "";
+    el("aboutVersion").textContent = current ? "v" + current : "v-";
+    el("aboutCurrentVersion").textContent = current ? "v" + current : "-";
+    el("updateLatest").textContent = latest ? "v" + latest : "-";
+    el("updatePublished").textContent = data.published_at
+      ? String(data.published_at).slice(0, 10)
+      : "-";
+    var link = el("updateLink");
+    link.href = data.release_url || data.releases_url || link.href;
+    var notes = el("updateNotes");
+    if (data.notes) {
+      notes.textContent = data.notes;
+      notes.classList.remove("hidden");
+    } else {
+      notes.textContent = "";
+      notes.classList.add("hidden");
+    }
+    if (data.error) {
+      el("updateStatus").textContent = data.error;
+    } else if (data.update_available) {
+      el("updateStatus").textContent = "发现新版本 v" + latest + "，可前往 Release 下载。";
+    } else {
+      el("updateStatus").textContent = "已是最新版本（v" + current + "）。";
+    }
+  }
+
+  function loadUpdate(force) {
+    if (state.updateLoading || (!force && state.updateLoaded)) {
+      return;
+    }
+    state.updateLoading = true;
+    var button = el("checkUpdateButton");
+    button.disabled = true;
+    el("updateStatus").textContent = "正在检查更新…";
+    api("/api/update" + (force ? "?force=1" : "")).then(function (data) {
+      state.updateLoaded = true;
+      renderUpdate(data);
+    }).catch(function (error) {
+      el("updateStatus").textContent = error.message;
+    }).finally(function () {
+      state.updateLoading = false;
+      button.disabled = false;
     });
   }
 
@@ -898,6 +953,7 @@
     });
     el("refreshProblems").addEventListener("click", function () { loadProblems(state.problemKind, false); });
     el("retryProblems").addEventListener("click", retryProblems);
+    el("checkUpdateButton").addEventListener("click", function () { loadUpdate(true); });
     Array.prototype.forEach.call(document.querySelectorAll(".nav-item"), function (item) {
       item.addEventListener("click", function () { showPage(item.getAttribute("data-page")); });
     });

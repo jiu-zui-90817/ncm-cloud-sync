@@ -74,7 +74,7 @@ auto_sync: true
 notify_on: always
 
 # 通知渠道。enabled=false 可先保存配置但不发送。
-# 支持 telegram / bark / ntfy / gotify / discord / slack / serverchan /
+# 支持 telegram / bark / ntfy / gotify / discord / slack / dingtalk / serverchan /
 # pushplus / pushover / pushdeer / webhook / smtp。
 notify_channels: []
 #  - type: bark
@@ -88,6 +88,13 @@ notify_channels: []
 #    config:
 #      bot_token: 123456:ABC
 #      chat_id: "123456789"
+#  - type: dingtalk
+#    name: 钉钉
+#    enabled: true
+#    config:
+#      webhook_url: https://oapi.dingtalk.com/robot/send?access_token=...
+#      secret: SEC...
+#      at_mobiles: "13800138000"
 
 # 全局试跑。命令行 --dry-run 也会打开。
 dry_run: false

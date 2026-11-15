@@ -20,9 +20,9 @@
 ## 特性
 
 - **原生飞牛应用**：`.fpk` 安装，带安装向导、启停、升级和卸载回调；**不需要 Docker**。
-- **内置 Web UI**：登录、状态、统计、手动同步、演练、设置、日志都在界面里完成；0.2.20 起分为概览 / 文件问题 / 设置 / 通知 / 日志与诊断五个分区。
+- **内置 Web UI**：登录、状态、统计、手动同步、演练、设置、日志都在界面里完成；0.2.20 起分为概览 / 文件问题 / 设置 / 通知 / 日志与诊断；0.2.21 起增加「关于」页，可查看当前版本并检查 GitHub 更新。
 - **失败与无权限明细**：概览里的“失败 / 无权限”卡片可点开，列出完整路径、错误原因和更新时间，支持复制路径、重置后重试。
-- **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、Server酱、PushPlus、Pushover、PushDeer、Webhook、SMTP 邮件；可按成功 / 失败 / 始终发送，界面里可以直接测试。
+- **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉机器人、Server酱、PushPlus、Pushover、PushDeer、Webhook、SMTP 邮件；可按成功 / 失败 / 始终发送，界面里可以直接测试。
 - **自动同步开关**：可以关闭后台自动同步，只保留手动同步。
 - **扫码登录**：界面生成网易云登录二维码，手机 App 扫码确认即可；登录态保存在应用数据目录。
 - **双重去重**：
@@ -49,7 +49,7 @@
           └─ 成功 ──► uploaded（记录 songId）
 ```
 
-去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。0.2.20 起 Web UI 分为概览 / 文件问题 / 设置 / 通知 / 日志，失败与无权限可查看明细并重置重试；后台自动同步可单独关闭；终止只结束当前一轮，自动同步仍按计划运行，只有暂停才会暂停自动同步直到点“继续”。
+去重顺序是“先本地、再云端”。云端 check 返回 needUpload=false 只代表文件字节已在网易云对象存储，并不代表云盘列表里已经有条目；程序仍会调用 eapi info/v2 + eapi pub/v2 补建条目，避免出现“提示已有、云盘却是空的”。0.2.18 起云盘写入按本机原版客户端的实际请求：先申请鲸鱼上传 token，用同一个 `resourceId` 和 `objectKey` 调 `musicupload.netease.com` 的 eapi info/v2；eapi body 只有业务字段 + 5 字段 header（`os`/`appver`/`deviceId`/`requestId`/`clientSign`），不发 `e_r`；`needUpload=false` 时不再申请 token，直接补建条目；0.2.19 起鲸鱼 token 申请失败不再回退旧 `/weapi/nos/token/alloc`，而是直接暂停整轮，避免旧接口 405 反复刷屏。0.2.20 起 Web UI 分为概览 / 文件问题 / 设置 / 通知 / 日志，失败与无权限可查看明细并重置重试；0.2.21 起增加「关于」页和检查更新，排除规则命中的旧记录自动隐藏为 ignored；后台自动同步可单独关闭；终止只结束当前一轮，自动同步仍按计划运行，只有暂停才会暂停自动同步直到点“继续”。
 
 ## 安装（飞牛 NAS，推荐）
 
@@ -63,7 +63,7 @@
 
 ### 1. 安装
 
-从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.20.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
+从 [Releases](https://github.com/jiu-zui-90817/wy-music-cloud/releases) 下载最新的版本化安装包（例如 `wy-music-cloud-0.2.21.fpk`），打开飞牛 NAS 应用中心 → 手动安装 → 选择该文件。
 
 也可以自行构建：
 
@@ -152,7 +152,7 @@ var/
 
 **扫码后手机提示“数据加载失败”或“服务器内部错误”**
 
-扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.20** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
+扫码接口经历过多次风控升级。0.2.6 的 eapi 扫码已经能拿到 `MUSIC_U`，但轮询在吸收 `Set-Cookie` 时可能因同名 Cookie 多 Path 抛异常并回到登录页；0.2.7 已改为直接解析原始 `Set-Cookie`，保留最后一个非空值。0.2.6 起使用网易云 PC 客户端的 `eapi` 接口（`interfacepc.music.163.com`，`type=3`），并带上 `deviceId`、PC 版本号和完整的设备请求头；二维码内容仍为 `https://music.163.com/login?codekey=...`。0.2.5 的 weapi 方案仍可能被部分账号风控拦截，0.2.4 的公开 `/api` 方案缺少设备上下文，手机确认后会报“数据加载失败”。升级到 **0.2.21** 后，在应用中心停止再启动应用，刷新页面并重新生成二维码。若仍然失败：展开登录卡片里的“查看诊断 / 日志（登录失败时先看这里）”，点“复制诊断”把版本、日志路径和最近日志发出来；同时可以用“扫码失败？改用 Cookie 登录”兜底，在电脑浏览器登录 [music.163.com](https://music.163.com)，从开发者工具复制包含 `MUSIC_U` 的 Cookie 粘贴登录。
 
 **扫码后仍显示未登录**
 
@@ -168,11 +168,11 @@ var/
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
-看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.2.20，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
+看日志卡片或“查看诊断”里的具体错误。0.2.7 及更早版本把带 weapi 加密的表单发到了 /api/cloud/upload/check，网易云网关按明文接口处理会返回 [400] 参数错误；0.2.8 已统一把 /api/... 改写成 /weapi/...，并校正 ext、length 字段。0.2.16 起查重改走 eapi。只改查重并不能解决写入阶段的 400：0.2.17 已把云盘信息提交改到 `musicupload.netease.com` 并使用鲸鱼 token，但 eapi body 还带着网页端的 `e_r`/12 字段 header。0.2.18 按原版 `cloudmusic_util` 改为 5 字段 header、无 `e_r`、数字 `resourceId` 和原始 `songid`，并跳过 `needUpload=false` 时多余的 token。升级到 0.2.21，停止再启动应用后重试。若仍失败，日志里会有“云盘查重失败”或“提交云盘信息失败”行，连同诊断信息一起反馈。其他常见原因是网络、Cookie 失效、云盘容量或接口变动；单个文件失败不会阻塞其他文件。
 
 **上传时提示 [400] 接口调用失败（提交云盘信息）**
 
-0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.2.20，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
+0.2.13 及更早版本用 weapi 提交云盘信息，2026-11 起会返回 [400] 接口调用失败。0.2.14-0.2.16 只换了 eapi 域名、header 和查重，写入链路仍然是旧的；0.2.17 换了鲸鱼 token 和 `musicupload.netease.com`，但 eapi body 仍带 `e_r=false` 和网页端 12 字段 header，`resourceId`/`songid` 还是字符串，所以仍然 400。0.2.18 按本机原版 `cloudmusic_util` 的实际请求修正：先 POST `http://musicupload.netease.com/api/whale/token/alloc` 申请鲸鱼 token（`channel=3`、真实文件名、md5、`bucket=jd-musicrep-privatecloud-audio-public`），用返回的 `token`/`objectKey` 上传字节，再用同一个 `resourceId` 和 `objectKey={bucket}/{objectKey}` 提交 info/v2；eapi body 只有业务字段 + 5 字段 header，不发 `e_r`，`resourceId` 为数字，`songid` 用查重返回的原始值（新文件是数字 0）；`needUpload=false` 时不申请 token。`pub/v2` 返回 201（重复发布）也按成功处理。升级到 0.2.21，停止再启动应用后重试；若仍失败，日志里的“提交云盘信息失败”会带上 filename、songid、resourceId、host、appver 和是否有 MUSIC_U，请连同诊断信息反馈。
 
 **上传时提示 Connection refused / 无法获取上传节点**
 
@@ -184,7 +184,7 @@ var/
 
 **很多文件提示没有读取权限 / 失败里“无权限”很多**
 
-应用以包用户 `wy-music-cloud` 运行。如果音乐文件属于其他用户且权限是 600，应用无法读取。到应用中心给本应用授权音乐目录，或在文件管理里给应用用户 `wy-music-cloud` 增加读取权限。0.2.10 会把这类错误单独计入“无权限”，日志每个文件只记一行警告，不再打印整段 traceback；0.2.20 起可在概览点“无权限”卡片查看具体路径和原因，授权后点“重置并重试”即可重新排队。
+应用以包用户 `wy-music-cloud` 运行。如果音乐文件属于其他用户且权限是 600，应用无法读取。到应用中心给本应用授权音乐目录，或在文件管理里给应用用户 `wy-music-cloud` 增加读取权限。0.2.10 会把这类错误单独计入“无权限”，日志每个文件只记一行警告，不再打印整段 traceback；0.2.20 起可在概览点“无权限”卡片查看具体路径和原因，授权后点“重置并重试”即可重新排队。0.2.21 起，命中排除规则的旧记录会自动转为 `ignored` 并从统计和问题列表隐藏，不再占用“待处理/失败”数字。
 
 **提示“云端已有”，但云盘里是空的**
 
@@ -193,6 +193,10 @@ var/
 **自动同步为什么没有运行**
 
 先确认设置里的“自动同步”开关是开的。0.2.20 起可以单独关闭后台自动同步，关闭后只有点“立即同步”才会运行；手动暂停也会暂停自动同步，点“继续”恢复；终止只结束当前一轮，不影响自动同步。
+
+**忽略 / 排除的文件为什么消失了**
+
+0.2.21 起，命中小文件/扩展名过滤或 `exclude` / `exclude_dirs` 的记录会标记为 `ignored`，不计入总数，也不出现在失败、无权限和待处理列表；这不会删除磁盘文件。取消排除后重新同步，扫描到该文件会恢复正常处理。
 
 **升级后设置还在吗**
 
@@ -276,6 +280,7 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `gotify` | `server`, `token` | 可选 `priority` |
 | `discord` | `webhook_url` | Discord Webhook |
 | `slack` | `webhook_url` | Slack Incoming Webhook |
+| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`at_mobiles` 被 @ 手机号 |
 | `serverchan` | `sendkey` | Server酱 |
 | `pushplus` | `token` | PushPlus |
 | `pushover` | `token`, `user` | Pushover |
@@ -312,7 +317,7 @@ wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 - `path`：文件绝对路径（主键）；
 - `size` / `mtime_ns`：判断文件是否变化；
 - `md5`：本地去重与云端 check 的依据；
-- `status`：`uploaded`、`skipped_local`、`skipped_remote`、`failed`、`missing` 等；
+- `status`：`uploaded`、`skipped_local`、`skipped_remote`、`failed`、`missing`、`ignored` 等；
 - `song_id` / `cloud_name`：上传成功后的云盘歌曲信息；
 - `attempts` / `last_error`：失败次数与原因。
 
@@ -322,7 +327,8 @@ wy-music-cloud [-c CONFIG] [--music-dir DIR ...] [--log-level LEVEL] <命令>
 - **本地状态库丢了**：重新算 MD5 后，云端 check 仍能挡住重复上传；
 - **文件被替换（同名不同内容）**：size 或 mtime 变化会触发重新计算和上传；
 - **云盘里手动删了歌**：本地状态仍是 `uploaded` 且文件没变，默认不会自动补传；用 `--force` 或删除对应状态行后重跑；
-- **文件被移动/改名**：会当作新路径处理，但本地/云端 MD5 去重仍会拦住重复上传。
+- **文件被移动/改名**：会当作新路径处理，但本地/云端 MD5 去重仍会拦住重复上传；
+- **被排除规则命中的旧记录**：0.2.21 起转为 `ignored` 并从统计/问题列表隐藏，取消排除后重新扫描会恢复。
 
 ## 风险与限制
 
@@ -342,7 +348,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、dry-run、缺失文件、QR 登录、Web API、通知和 CLI。
+测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、dry-run、缺失文件、QR 登录、Web API、通知、更新检查和 ignored 状态。
 
 构建飞牛原生应用：
 

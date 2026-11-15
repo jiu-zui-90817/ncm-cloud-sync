@@ -282,6 +282,8 @@ def test_notify_types_and_test_endpoint(tmp_path: Path, monkeypatch: Any) -> Non
     assert status == "200 OK"
     types = {item["type"]: item for item in data["types"]}
     assert "telegram" in types
+    assert "dingtalk" in types
+    assert "secret" in types["dingtalk"]["secret"]
     assert "url" in types["bark"]["fields"]
     assert types["bark"]["secret"] == ["url"]
 
@@ -305,6 +307,58 @@ def test_notify_types_and_test_endpoint(tmp_path: Path, monkeypatch: Any) -> Non
     )
     assert status == "400 Bad Request"
     assert data["ok"] is False
+
+
+def test_status_total_excludes_ignored(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        state.mark_seen("hidden.mp3", 10, 1)
+        state.mark_ignored("hidden.mp3", "命中排除规则")
+        state.mark_seen("pending.mp3", 10, 1)
+    status, _, data = call(app, "/api/status")
+    assert status == "200 OK"
+    assert data["stats"]["total"] == 1
+    assert data["stats"]["pending"] == 1
+
+
+def test_update_api_and_force_refresh(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    calls: list[int] = []
+
+    def fake_fetch():
+        calls.append(1)
+        return {
+            "latest": "9.9.9",
+            "release_url": "https://example.com/release",
+            "published_at": "2026-11-15T00:00:00Z",
+            "notes": "更新内容",
+        }
+
+    app.updates._fetch = fake_fetch
+    status, _, data = call(app, "/api/update")
+    assert status == "200 OK"
+    assert data["latest"] == "9.9.9"
+    assert data["update_available"] is True
+    assert data["repo_url"].startswith("https://github.com/")
+    assert len(calls) == 1
+
+    status, _, data = call(app, "/api/update", query="force=1")
+    assert status == "200 OK"
+    assert len(calls) == 2
+
+    app.updates._fetch = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    status, _, data = call(app, "/api/update", query="force=1")
+    assert status == "200 OK"
+    assert "boom" in data["error"]
+
+
+def test_static_page_has_about_and_update(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, html = call(app, "/")
+    assert status == "200 OK"
+    assert 'data-page="about"' in html
+    assert "checkUpdateButton" in html
+    assert "updateNotes" in html
 
 
 def test_stop_current_keeps_auto_sync_enabled(tmp_path: Path, monkeypatch: Any) -> None:

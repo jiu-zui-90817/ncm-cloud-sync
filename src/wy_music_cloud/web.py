@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -31,6 +31,7 @@ from .login import apply_qr_cookies, build_qr_url
 from .session import load_session, save_session
 from .state import StateStore
 from .syncer import SyncStats, Syncer
+from .updates import REPO_URL, RELEASES_URL, UpdateChecker
 
 logger = logging.getLogger(__name__)
 
@@ -734,6 +735,10 @@ class WebApp:
     log_paths: list[Path]
     data_dir: Path
     allow_local: bool = False
+    updates: UpdateChecker = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.updates = UpdateChecker(__version__)
 
     def __call__(self, environ: dict[str, Any], start_response: StartResponse) -> list[bytes]:
         try:
@@ -790,6 +795,13 @@ class WebApp:
         try:
             if path == "/api/status" and method == "GET":
                 return self._json(start_response, "200 OK", self._status())
+            if path == "/api/update" and method == "GET":
+                query = parse_qs(str(environ.get("QUERY_STRING") or ""))
+                force = (query.get("force") or ["0"])[0].lower() in {"1", "true", "yes"}
+                result = dict(self.updates.check(force=force))
+                result["repo_url"] = REPO_URL
+                result["releases_url"] = RELEASES_URL
+                return self._json(start_response, "200 OK", result)
             if path == "/api/qr" and method == "POST":
                 return self._json(start_response, "200 OK", self.login.start())
             if path == "/api/login/cookie" and method == "POST":
@@ -944,7 +956,7 @@ class WebApp:
             "settings": settings,
             "config": self.config.redacted(),
             "stats": {
-                "total": sum(stats.values()),
+                "total": sum(value for key, value in stats.items() if key != "ignored"),
                 "uploaded": stats.get("uploaded", 0),
                 "pending": stats.get("pending", 0),
                 "failed": problem_counts.get("failed", 0),

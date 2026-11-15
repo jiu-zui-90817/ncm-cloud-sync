@@ -250,3 +250,41 @@ def test_permission_error_is_counted(tmp_path: Path, monkeypatch) -> None:
         assert stats.permission_denied == 1
         assert record is not None and record.status == "failed"
         assert "没有读取权限" in (record.last_error or "")
+
+
+def test_small_and_unsupported_files_are_marked_ignored(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    small = music / "small.mp3"
+    small.write_bytes(b"a")
+    unsupported = music / "other.mp3"
+    unsupported.write_bytes(b"b" * 100)
+    config = make_config(tmp_path, music)
+    config.min_size = 10
+    config.upload_extensions = ("flac",)
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.ignored == 2
+        assert stats.skipped == 0
+        assert state.get(small).status == "ignored"
+        assert state.get(unsupported).status == "ignored"
+
+
+def test_excluded_history_is_hidden_not_missing(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    keep = music / "keep.mp3"
+    keep.write_bytes(b"a" * 100)
+    excluded = music / "有声书"
+    excluded.mkdir()
+    old = excluded / "old.mp3"
+    old.write_bytes(b"b" * 100)
+    config = make_config(tmp_path, music)
+    config.exclude_dirs = (excluded,)
+    with StateStore(config.db_path) as state:
+        state.mark_seen(old, 100, 1)
+        state.mark_uploaded(old, song_id=1, cloud_name="old")
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert state.get(old).status == "ignored"
+        assert stats.missing == 0
+        assert state.get(keep).status == "uploaded"

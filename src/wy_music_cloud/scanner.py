@@ -39,6 +39,32 @@ def _path_is_excluded(path: str | Path, excluded: tuple[str, ...]) -> bool:
     return False
 
 
+def path_is_excluded(
+    path: str | Path,
+    exclude: Iterable[str] = (),
+    exclude_dirs: Iterable[str | Path] = (),
+    music_dirs: Iterable[str | Path] = (),
+) -> bool:
+    """判断某个已落库路径是否命中文件名或排除目录规则。
+
+    如果提供 music_dirs，只检查音乐目录内的相对路径，避免音乐根目录本身
+    的名字（例如以 . 开头）误伤整棵目录。
+    """
+    patterns = tuple(exclude)
+    roots = tuple(_path_key(item) for item in exclude_dirs if str(item).strip())
+    if _path_is_excluded(path, roots):
+        return True
+    target = Path(path)
+    parts = target.parts
+    for music_root in music_dirs:
+        try:
+            parts = target.relative_to(Path(music_root)).parts
+            break
+        except ValueError:
+            continue
+    return any(is_excluded(part, patterns) for part in parts)
+
+
 def _walk(
     directory: Path,
     extensions: set[str],
