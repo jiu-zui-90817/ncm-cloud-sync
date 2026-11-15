@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.10 仅整理文档与更新日志，无协议变化。
 - 0.3.9 起云盘容量来自 `/api/v1/cloud/get` 顶层 `maxSize`（总字节）、`size`（已用字节）、`count`（歌曲数），由 `parse_cloud_capacity()` 解析为 `supported/total_bytes/used_bytes/free_bytes/percent/songs`；字段缺失时 `supported=false`，不把 0 当已满。新增 `GET /api/capacity`，只请求一页 `limit=1` 读取容量，不拉取全部歌曲。`Syncer` 在云盘列表加载后记录容量，每个文件上传前用 `total_bytes - used_bytes - bytes_uploaded` 校验；空间不足时该文件标记失败并记录“云盘剩余空间不足”，不调用上传接口。
 - 0.3.8 修复 0.3.7 的启动回归：`web.py` 丢失 `if __name__ == "__main__": raise SystemExit(main())`，`python -m ncm_cloud_sync.web` 只导入模块后退出 0，应用中心报“Web 服务启动失败”；已恢复入口并新增 `tests/test_web.py::test_web_module_entrypoint` 回归测试。
 - 0.3.7 起新增 `GET /api/permissions/check`：只读检查当前 `music_dirs` 中配置扩展名的音频文件，返回 `ok/user/files/dirs/unreadable_files/unreadable_dirs/samples/directories/truncated/limit/commands/notes`；`directories[]` 含 `path/exists/readable/files/dirs/unreadable_files/unreadable_dirs/truncated`；`commands` 为去重后的 `setfacl` 修复命令，不会执行。单次最多 200000 个文件、30 秒，超限时 `truncated=true`。

@@ -1,7 +1,7 @@
 appname=ncm-cloud-sync
-version=0.3.9
+version=0.3.10
 display_name=NCM 云盘同步
-desc=NCM Cloud Sync 原生飞牛应用：带 Web 界面和扫码登录，把本地音乐自动同步到网易云音乐云盘，支持本地与云端双重去重。
+desc=把本地音乐自动同步到网易云音乐云盘，支持 Web 界面、扫码登录和本地/云端双重去重。
 source=thirdparty
 platform=all
 maintainer=jiu-zui-90817
@@ -15,4 +15,4 @@ disable_authorization_path=false
 install_dep_apps=python312
 desktop_uidir=ui
 desktop_applaunchname=ncm-cloud-sync.main
-changelog=0.3.9：新增云盘容量显示与上传前容量校验：账号卡显示已用/总量/剩余和占用比例；每轮同步读取云盘容量，上传前按本轮剩余空间判断，空间不足时只把该文件标记失败并提示，不调用上传接口，其他文件继续；0.3.8：修复 0.3.7 覆盖安装后 Web 服务启动失败：0.3.7 打包时 web.py 丢失 __main__ 入口，python -m ncm_cloud_sync.web 只加载模块就退出；已恢复入口并新增回归测试；0.3.7：新增权限体检：文件问题页可一键检查应用账号能否读取音乐目录，列出无权限目录/文件示例，并生成 setfacl 修复命令（只检查，不修改权限）；仅扫描后概览“待处理”显示最近一次仅扫描的待上传数量；0.3.6：修复 0.3.5 上传前预检崩溃：云盘映射的值是 songId（int），预检误按字典读取 size，报“'int' object has no attribute 'get'”导致每轮同步中止；现在同时兼容 md5→songId 和 md5→元数据两种映射，预检可正常通过；0.3.5：移除与仅扫描重叠的“演练”模式，同步控制只保留立即同步、仅扫描、暂停、终止、继续；每轮上传前新增接口预检（登录态 + 云盘列表 + 上传查重），任何一项不可用就中止本轮、不申请上传 token、不修改文件状态，并按失败结果推送通知；云盘列表读取失败不再当作空云盘继续；旧历史中的演练记录仍可只读查看；0.3.4：概览“最近同步”每一行可点开查看本轮逐文件结果（上传/跳过/失败/无权限/忽略/缺失，仅扫描含待上传/已匹配/云端独有/本地重复），历史仍只保留最近 5 次；同步控制新增“仅扫描”，只读读取云盘列表并计算本地与云端差异，不写同步状态、不上传、不发通知；新增 GET /api/runs/<id> 按类型筛选运行明细；0.3.3：概览将失败与无权限合并为“问题文件”，文件问题页可按全部/失败/无权限筛选并标注类型；扫描统计改为本地候选数，新增实际处理数、云盘条目数和本地过滤明细（扩展名/排除/不可读/目录缺失），上次运行直接显示，便于解释云盘与本地数量差；同步仍按“扫描本地候选 → 读取云盘 MD5 对账 → 逐文件处理”，不建立云端/本地双表；0.3.2：修复覆盖安装后系统用户仍是 wy-music-cloud：package privilege 改为 ncm-cloud-sync；概览新增最近 5 次执行记录，更早记录自动清理；app.log 调整为单文件 2 MB、保留 2 个备份（总上限 6 MB），日志页显示每个文件大小和上限；0.3.1：修复云盘对账失效：从 cloud/get 的 privateCloud.md5 读取已有歌曲，同步前按 MD5 跳过；needUpload=false 的补建单独统计为“补建”，不再计入上传和字节；修复 app.log 每条日志重复两次（stdout 改写到 app.out）；0.3.0：项目更名为 NCM Cloud Sync，fnOS 应用标识改为 ncm-cloud-sync，Python 包改为 ncm_cloud_sync，CLI 改为 ncm-cloud-sync；这是新的应用标识，不继承 0.2.x 安装与数据，迁移方式见 README；钉钉机器人新增自定义关键词（多个用逗号分隔），并补充 IP 地址段白名单说明；环境变量前缀改为 NCM_CLOUD_SYNC_；0.2.22：修复同步结束通知被静默跳过（通知配置是 tuple 时未发送，钉钉等渠道实际收不到）；Web 图标改用与应用图标一致的图标；覆盖安装和应用中心改设置不再丢失排除目录与通知配置；0.2.21：新增钉钉机器人通知（支持加签和被 @ 手机号）；排除规则命中的旧记录自动标记为 ignored，不再出现在统计和问题列表；新增「关于」页与 GitHub 检查更新；0.2.20：新增失败/无权限文件明细与重置重试；Web UI 重构为概览/文件问题/设置/通知/日志与诊断；新增 Telegram、Bark、ntfy、Gotify、Discord、Slack、Server酱、PushPlus、Pushover、PushDeer、Webhook、SMTP 通知与测试；新增自动同步开关；终止只结束当前一轮，不再关闭自动同步；0.2.19：修复 405 反复出现：鲸鱼 token 失败不再回退旧的 /weapi/nos/token/alloc，限流时暂停整轮；新增暂停、终止、继续；新增排除目录；同步状态区分暂停与终止；0.2.18：修复 info/v2 仍返回 400：按原版 cloudmusic_util 改为 5 字段 header（os/appver/deviceId/requestId/clientSign）、不再发送 e_r，resourceId 用数字、songid 用查重原始值；needUpload=false 不再申请 token；pub/v2 的 201 视为重复发布成功；0.2.17：改用本机客户端同款新版云盘上传流程：先申请鲸鱼上传 token（/api/whale/token/alloc），用同一个 resourceId/objectKey 上传字节并向 musicupload.netease.com 的 eapi info/v2 提交，eapi 使用完整登录 Cookie；旧 NOS token 只作回退；0.2.16：修复 info/v2 仍可能 400：云盘查重改走 ea... (line truncated to 2000 chars)
+changelog=0.3.10：整理文档与更新日志，无功能变更；0.3.9：新增云盘容量显示与上传前容量校验；0.3.8：修复覆盖安装后 Web 服务启动失败；0.3.7：新增权限体检和仅扫描待处理数量；更早版本见 GitHub Releases。
