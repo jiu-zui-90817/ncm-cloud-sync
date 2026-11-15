@@ -24,16 +24,16 @@ def test_check_upload_payload() -> None:
     client = make_client()
     calls: list[tuple] = []
 
-    def fake_weapi(path, payload=None, **kwargs):
+    def fake_eapi(path, payload=None, **kwargs):
         calls.append((path, payload, kwargs))
         return {"needUpload": True, "songId": 12}
 
-    client._weapi = fake_weapi  # type: ignore[method-assign]
+    client._eapi_api = fake_eapi  # type: ignore[method-assign]
     result = client.check_upload("abc", 123, "mp3")
     assert result["need_upload"] is True
     assert result["song_id"] == 12
     path, payload, kwargs = calls[0]
-    assert path == "/weapi/cloud/upload/check"
+    assert path == "/api/cloud/upload/check"
     assert "host" not in kwargs
     assert payload["ext"] == ""
     assert payload["length"] == 123
@@ -42,9 +42,34 @@ def test_check_upload_payload() -> None:
 
 def test_check_upload_keeps_zero_song_id() -> None:
     client = make_client()
-    client._weapi = lambda *a, **k: {"needUpload": True, "songId": 0}  # type: ignore[method-assign]
+    client._eapi_api = lambda *a, **k: {"needUpload": True, "songId": 0}  # type: ignore[method-assign]
     result = client.check_upload("abc", 123, "mp3")
     assert result["song_id"] == 0
+
+
+def test_check_upload_bootstraps_nmtid_for_cloud_info() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if len(captured) == 1:
+            return httpx.Response(
+                200,
+                json={"code": 200, "needUpload": True, "songId": 0},
+                headers={"set-cookie": "NMTID=from-check; Path=/; Domain=.music.163.com"},
+            )
+        return httpx.Response(200, json={"code": 200, "songId": "9"})
+
+    client = CloudClient(
+        {"MUSIC_U": "music-u", "__csrf": "csrf"},
+        transport=httpx.MockTransport(handler),
+        retries=0,
+        rate_limit=0,
+    )
+    client.check_upload("abc", 123, "mp3")
+    assert client.cookies["NMTID"] == "from-check"
+    client._eapi_api("/api/upload/cloud/info/v2", {"md5": "abc", "resourceId": 42})
+    assert "NMTID=from-check" in captured[1].headers.get("cookie", "")
 
 
 def test_alloc_token_sanitizes_name() -> None:

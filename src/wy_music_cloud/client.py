@@ -538,11 +538,13 @@ class CloudClient:
             "version": 1,
         }
         try:
-            body = self._weapi("/weapi/cloud/upload/check", payload)
+            # 查重也必须走 eapi：服务端只对 eapi 请求下发 NMTID，
+            # 后续 info/v2 / pub/v2 没有 NMTID 会直接返回 400 接口调用失败。
+            body = self._eapi_api("/api/cloud/upload/check", payload)
         except ApiError as exc:
             # 400 参数错误通常意味着接口路径/字段又变了，把请求形状写进日志。
             logger.error(
-                "云盘查重失败: size=%s ext=%s path=/weapi/cloud/upload/check error=%s",
+                "云盘查重失败: size=%s ext=%s path=/api/cloud/upload/check error=%s",
                 size,
                 ext,
                 exc,
