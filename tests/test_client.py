@@ -32,6 +32,7 @@ def test_check_upload_payload() -> None:
     result = client.check_upload("abc", 123, "mp3")
     assert result["need_upload"] is True
     assert result["song_id"] == 12
+    assert result["song_id_raw"] == 12
     path, payload, kwargs = calls[0]
     assert path == "/api/cloud/upload/check"
     assert "host" not in kwargs
@@ -45,6 +46,7 @@ def test_check_upload_keeps_zero_song_id() -> None:
     client._eapi_api = lambda *a, **k: {"needUpload": True, "songId": 0}  # type: ignore[method-assign]
     result = client.check_upload("abc", 123, "mp3")
     assert result["song_id"] == 0
+    assert result["song_id_raw"] == 0
 
 
 def test_check_upload_bootstraps_nmtid_for_cloud_info() -> None:
@@ -157,7 +159,7 @@ def test_finish_upload_matches_official_payload() -> None:
         captured.update(payload)
         return {"code": 200, "songId": "123", "songIdLong": 123}
 
-    client._eapi_api = fake_eapi  # type: ignore[method-assign]
+    client._eapi_native = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
         song_id=None,
@@ -169,8 +171,8 @@ def test_finish_upload_matches_official_payload() -> None:
         object_key="jd-musicrep-privatecloud-audio-public/obj/key",
     )
     assert new_id == 123
-    assert captured["resourceId"] == "36656729598"
-    assert captured["songid"] == "0"
+    assert captured["resourceId"] == 36656729598
+    assert captured["songid"] == 0
     assert captured["bitrate"] == 999000
     assert captured["objectKey"] == "jd-musicrep-privatecloud-audio-public/obj/key"
     assert captured["filename"] == "A - B.mp3"
@@ -185,19 +187,20 @@ def test_finish_upload_string_song_id_and_resource_id() -> None:
         captured.update(payload)
         return {"code": 200, "songId": "7"}
 
-    client._eapi_api = fake_eapi  # type: ignore[method-assign]
+    client._eapi_native = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
-        song_id=7,
+        song_id="7",
         filename="A.mp3",
         song="A",
         album="未知专辑",
         artist="A",
         resource_id="42",
+        object_key="jd-musicrep-privatecloud-audio-public/obj/key",
     )
     assert new_id == 7
     assert captured["songid"] == "7"
-    assert captured["resourceId"] == "42"
+    assert captured["resourceId"] == 42
 
 
 def test_finish_upload_submits_zero_song_id() -> None:
@@ -208,7 +211,7 @@ def test_finish_upload_submits_zero_song_id() -> None:
         captured.update(payload or {})
         return {"code": 200, "songId": "5"}
 
-    client._eapi_api = fake_eapi  # type: ignore[method-assign]
+    client._eapi_native = fake_eapi  # type: ignore[method-assign]
     new_id = client.finish_upload(
         md5="abc",
         song_id=0,
@@ -219,7 +222,8 @@ def test_finish_upload_submits_zero_song_id() -> None:
         resource_id=1,
     )
     assert new_id == 5
-    assert captured["songid"] == "0"
+    assert captured["songid"] == 0
+    assert "resourceId" not in captured
 
 
 def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypatch) -> None:
@@ -230,12 +234,7 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     events: list[str] = []
     captured: dict = {}
 
-    def whale(md5, filename):
-        assert filename == "whatever.mp3"
-        events.append("whale")
-        return {"resourceId": 36656729598, "objectKey": "obj/key", "token": "nos-token"}
-
-    client.whale_alloc = whale  # type: ignore[method-assign]
+    client.whale_alloc = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not alloc"))  # type: ignore[method-assign]
     client.upload_to_nos = lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not upload bytes"))  # type: ignore[method-assign]
     client.finish_upload = lambda **k: (captured.update(k), 7)[1]  # type: ignore[method-assign]
     client.publish = lambda song_id: events.append(f"pub:{song_id}")  # type: ignore[method-assign]
@@ -246,11 +245,13 @@ def test_upload_remote_exists_still_finalizes_metadata(tmp_path: Path, monkeypat
     assert result.reason == "uploaded"
     assert result.song_id == 7
     assert captured["song_id"] == 7
-    assert captured["resource_id"] == 36656729598
-    assert captured["object_key"] == f"{NOS_BUCKET}/obj/key"
+    assert captured["resource_id"] == 0
+    assert captured["object_key"] is None
     assert captured["filename"] == "whatever.mp3"
     assert captured["song"] == "晴天"
-    assert events == ["whale", "pub:7"]
+    assert captured["album"] == ""
+    assert captured["artist"] == ""
+    assert events == ["pub:7"]
 
 
 def test_upload_full_sequence(tmp_path: Path, monkeypatch) -> None:
@@ -381,14 +382,14 @@ def test_eapi_cloud_info_request_shape() -> None:
         retries=0,
         rate_limit=0,
     )
-    body = client._eapi_api(
+    body = client._eapi_native(
         "/api/upload/cloud/info/v2",
-        {"md5": "abc", "resourceId": "42"},
+        {"md5": "abc", "resourceId": 42},
         base_url=client_module.EAPI_UPLOAD_URL,
     )
     assert body["code"] == 200
     assert captured["url"] == "http://musicupload.netease.com/eapi/upload/cloud/info/v2"
-    assert "NeteaseMusic 9.0.90" in captured["ua"]
+    assert "NeteaseMusicDesktop/3.1.42.205594" in captured["ua"]
     assert "MUSIC_U=music-u" in captured["cookie"]
     assert "NMTID=nmtid" in captured["cookie"]
 
@@ -398,12 +399,12 @@ def test_eapi_cloud_info_request_shape() -> None:
     parts = text.split("-36cd479b6b5-")
     assert parts[0] == "/api/upload/cloud/info/v2"
     payload = json.loads(parts[1])
-    assert payload["e_r"] is False
-    assert payload["header"]["MUSIC_U"] == "music-u"
-    assert payload["header"]["deviceId"]
-    assert "NMTID" not in payload["header"]
-    assert payload["header"]["appver"] == "3.1.29.205117"
-    assert payload["resourceId"] == "42"
+    assert "e_r" not in payload
+    assert set(payload["header"]) == {"os", "appver", "deviceId", "requestId", "clientSign"}
+    assert payload["header"]["appver"] == "3.1.42.205594"
+    assert len(payload["header"]["requestId"]) == 8
+    assert "@@@" in payload["header"]["clientSign"]
+    assert payload["resourceId"] == 42
 
 
 def test_publish_uses_eapi() -> None:
@@ -421,6 +422,20 @@ def test_publish_uses_eapi() -> None:
     assert captured["path"] == "/api/cloud/pub/v2"
     assert captured["payload"] == {"songid": "99"}
     assert captured["kwargs"]["base_url"] == client_module.EAPI_PUB_URL
+    assert captured["kwargs"]["check"] is False
+
+
+def test_publish_accepts_duplicate_code() -> None:
+    client = make_client()
+    client._eapi_api = lambda *a, **k: {"code": 201}  # type: ignore[method-assign]
+    client.publish(1)
+
+
+def test_publish_raises_on_real_error() -> None:
+    client = make_client()
+    client._eapi_api = lambda *a, **k: {"code": 400, "message": "bad"}  # type: ignore[method-assign]
+    with pytest.raises(ApiError):
+        client.publish(1)
 
 
 def test_cloud_songs_pagination() -> None:

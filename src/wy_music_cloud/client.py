@@ -71,6 +71,14 @@ EAPI_PC_USER_AGENT = (
 # info/v2 仍然返回 [400] 接口调用失败。
 EAPI_CLOUD_APPVER = "3.1.29.205117"
 EAPI_IPHONE_USER_AGENT = "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)"
+# 原版桌面客户端原生上传器（cloudmusic_util）的 eapi 头：只带
+# os/appver/deviceId/requestId/clientSign 五个字段，且没有 e_r。
+EAPI_NATIVE_APPVER = "3.1.42.205594"
+EAPI_NATIVE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 "
+    "NeteaseMusicDesktop/3.1.42.205594"
+)
 
 
 @dataclass
@@ -397,6 +405,46 @@ class CloudClient:
         self._absorb_cookie_lines(lines)
         return result
 
+    def _eapi_native(
+        self,
+        uri: str,
+        payload: dict[str, Any],
+        *,
+        check: bool = True,
+        base_url: str = EAPI_UPLOAD_URL,
+    ) -> dict[str, Any]:
+        """模拟原版客户端原生上传器的 eapi 请求。
+
+        cloudmusic_util 的 body 只有业务字段 + header，header 仅
+        os/appver/deviceId/requestId/clientSign，没有 e_r，也没有
+        网页端那套 osver/versioncode/channel 字段。
+        """
+        device_id = self._ensure_anonymous_device()
+        body = dict(payload)
+        body["header"] = {
+            "os": "pc",
+            "appver": EAPI_NATIVE_APPVER,
+            "deviceId": device_id,
+            "requestId": secrets.token_hex(4).upper(),
+            "clientSign": str(self.cookies.get("clientSign") or ""),
+        }
+        form = encrypt_eapi(uri, body)
+        cookie = cookie_header(self.cookies)
+        lines: list[str] = []
+        result = self._post_json(
+            base_url + "/eapi/" + uri[len("/api/"):],
+            form,
+            headers={
+                "User-Agent": EAPI_NATIVE_USER_AGENT,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": cookie,
+            },
+            check=check,
+            cookie_sink=lines,
+        )
+        self._absorb_cookie_lines(lines)
+        return result
+
     # -- 匿名设备上下文 ---------------------------------------------------
     @staticmethod
     def _gen_device_id() -> str:
@@ -413,6 +461,23 @@ class CloudClient:
             f"{1 + (seed // 70) % 255}.{1 + (seed // (70 * 255)) % 255}"
         )
 
+    @staticmethod
+    def _gen_client_sign(device_id: str) -> str:
+        """按 open-orpheus 的方式生成原版客户端 clientSign。
+
+        原版 getADDeviceID 返回 ``MAC@@@十六进制硬件串@@@@@@sha256``，
+        服务端只校验格式与稳定性，因此用 deviceId 派生一个固定 MAC。
+        """
+        seed = hashlib.sha256(("wy-music-cloud:" + device_id).encode("utf-8")).digest()
+        mac = ":".join(f"{byte:02X}" for byte in seed[:6])
+        mac = f"{int(mac[:2], 16) & 0xFC:02X}" + mac[2:]
+        legacy = hashlib.sha256(f"{device_id}:{mac}".encode("utf-8")).hexdigest().upper()[:32]
+        legacy = "_".join(legacy[index:index + 4] for index in range(0, 32, 4))
+        encoded = legacy.encode("utf-8").hex().upper()
+        sign_str = f"{mac}@@@{encoded}"
+        digest = hashlib.sha256(sign_str.encode("utf-8")).hexdigest()
+        return f"{sign_str}@@@@@@{digest}"
+
     def _ensure_anonymous_device(self) -> str:
         """注入匿名设备 Cookie，供扫码接口校验。
 
@@ -424,6 +489,10 @@ class CloudClient:
         if len(device_id) != 52 or any(ch not in "0123456789ABCDEF" for ch in device_id):
             device_id = self._gen_device_id()
         self.cookies["deviceId"] = device_id
+        client_sign = str(self.cookies.get("clientSign") or "")
+        if not client_sign:
+            client_sign = self._gen_client_sign(device_id)
+        self.cookies["clientSign"] = client_sign
 
         nuid = self.cookies.get("_ntes_nuid") or secrets.token_hex(32)
         now_ms = int(time.time() * 1000)
@@ -555,6 +624,8 @@ class CloudClient:
             # 保留 0：新文件查重会返回 songId=0，官方客户端仍会把它作为
             # songid="0" 提交；只有响应里完全没有 songId 时才省略。
             "song_id": _as_int(raw_song_id, 0) if raw_song_id is not None else None,
+            # 原版前端把 check 响应里的 songId 原样提交，所以保留原始类型。
+            "song_id_raw": raw_song_id,
             "raw": body,
         }
 
@@ -702,7 +773,7 @@ class CloudClient:
         self,
         *,
         md5: str,
-        song_id: int | None,
+        song_id: int | str | None,
         filename: str,
         song: str,
         album: str,
@@ -717,17 +788,18 @@ class CloudClient:
             "bitrate": _as_int(bitrate, 999000),
             "filename": filename,
             "md5": md5,
-            "resourceId": str(resource_id),
             "song": song,
-            # HyPlayer / ncm 都把 songid 作为字符串提交，0 也提交。
-            "songid": str(song_id) if song_id is not None else "0",
+            # 原版前端把查重返回的 songId 原样提交；新文件是数字 0。
+            "songid": song_id if song_id is not None else 0,
         }
         if object_key:
-            # 新流程要求 objectKey 为 {bucket}/{objectKey}，且与鲸鱼 token 对应。
+            # 新流程要求 objectKey 为 {bucket}/{objectKey}，且与鲸鱼 token 对应；
+            # needUpload=false 时原版客户端不提交 objectKey/resourceId。
             payload["objectKey"] = object_key
+            payload["resourceId"] = _as_int(resource_id, 0)
         logger.debug("提交云盘信息: %s", payload)
         try:
-            body = self._eapi_api(
+            body = self._eapi_native(
                 "/api/upload/cloud/info/v2",
                 payload,
                 base_url=EAPI_UPLOAD_URL,
@@ -739,7 +811,7 @@ class CloudClient:
                 payload.get("songid"),
                 payload.get("resourceId"),
                 EAPI_UPLOAD_URL,
-                EAPI_CLOUD_APPVER,
+                EAPI_NATIVE_APPVER,
                 "yes" if self.cookies.get("MUSIC_U") else "no",
                 exc,
             )
@@ -750,12 +822,18 @@ class CloudClient:
         return new_id
 
     def publish(self, song_id: int) -> None:
-        # pub/v2 仍走 interface eapi，songid 用字符串。
-        self._eapi_api(
+        # pub/v2 仍走 interface eapi，songid 用字符串；201 表示重复发布，
+        # 对同步来说同样是成功，不能当成失败。
+        body = self._eapi_api(
             "/api/cloud/pub/v2",
             {"songid": str(song_id)},
             base_url=EAPI_PUB_URL,
+            check=False,
         )
+        code = _as_int(body.get("code"), 200)
+        if code not in (200, 201):
+            message = str(body.get("message") or body.get("msg") or "接口调用失败")
+            raise ApiError(message, code=code, url=EAPI_PUB_URL + "/eapi/cloud/pub/v2")
 
     def upload(
         self,
@@ -784,36 +862,40 @@ class CloudClient:
 
         tags = read_tags(path)
         name = sanitize_filename(tags.get("title") or path.stem)
-        # 新版流程先申请鲸鱼 token，再上传字节并用同一个 token 的
-        # resourceId + objectKey 提交 info/v2。老 NOS token 仅作兼容回退。
-        try:
-            token = self.whale_alloc(md5, path.name)
-            logger.info(
-                "鲸鱼上传 token: resourceId=%s objectKey=%s",
-                token.get("resourceId"),
-                token.get("objectKey"),
-            )
-        except (ApiError, UploadError) as exc:
-            logger.warning("鲸鱼上传 token 申请失败，回退到旧 NOS token: %s", exc)
-            token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
+        token: dict[str, Any] | None = None
         if check["need_upload"]:
+            # 新版流程先申请鲸鱼 token，再上传字节并用同一个 token 的
+            # resourceId + objectKey 提交 info/v2。老 NOS token 仅作兼容回退。
+            try:
+                token = self.whale_alloc(md5, path.name)
+                logger.info(
+                    "鲸鱼上传 token: resourceId=%s objectKey=%s",
+                    token.get("resourceId"),
+                    token.get("objectKey"),
+                )
+            except (ApiError, UploadError) as exc:
+                logger.warning("鲸鱼上传 token 申请失败，回退到旧 NOS token: %s", exc)
+                token = self.alloc_token(md5, name, ext, bucket=NOS_BUCKET)
             self.upload_to_nos(token, path, md5, ext)
         else:
-            # needUpload=false 只说明文件字节已在网易云对象存储，
-            # 云盘条目仍需 info/v2 + pub/v2 才会出现在云盘列表；
-            # 这里复用同一个 token 的 resourceId 补建条目。
+            # needUpload=false 说明文件字节已在网易云对象存储；原版客户端
+            # 不再申请 token，直接补建云盘条目（info/v2 + pub/v2）。
             logger.info("文件内容已在网易云对象存储，补建云盘条目: %s", path)
         object_key = None
-        if token.get("objectKey"):
-            object_key = f"{NOS_BUCKET}/{token['objectKey']}"
+        resource_id = 0
+        if token:
+            resource_id = token.get("resourceId", 0)
+            if token.get("objectKey"):
+                object_key = f"{NOS_BUCKET}/{token['objectKey']}"
         song_id = self.finish_upload(
             md5=md5,
-            song_id=check["song_id"],
+            song_id=check.get("song_id_raw", check["song_id"]),
             filename=path.name,
             song=name,
-            album=display_album(tags),
-            artist=display_artist(tags),
-            resource_id=token.get("resourceId", 0),
+            # 原版客户端直接提交标签里的 album/artist，缺失时为空字符串。
+            album=str(tags.get("album") or ""),
+            artist=str(tags.get("artist") or ""),
+            resource_id=resource_id,
             object_key=object_key,
         )
         self.publish(song_id)
