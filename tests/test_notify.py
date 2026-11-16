@@ -93,10 +93,10 @@ def test_notify_run_skips_empty_by_default(monkeypatch: pytest.MonkeyPatch) -> N
     assert notify.notify_run(channels, "always", empty) == []
     assert sent == []
     assert len(notify.notify_run(channels, "always", empty, notify_empty=True)) == 1
-    assert sent == ["网易云云盘任务完成"]
+    assert sent == ["NCM 云盘同步任务完成"]
 
 
-def test_dingtalk_keyword_defaults_to_netease() -> None:
+def test_dingtalk_keyword_defaults_and_migrates_to_ncm() -> None:
     channels = notify.normalize_channels(
         [
             {"type": "dingtalk", "config": {"webhook_url": "https://example.com/robot"}},
@@ -104,10 +104,20 @@ def test_dingtalk_keyword_defaults_to_netease() -> None:
                 "type": "dingtalk",
                 "config": {"webhook_url": "https://example.com/robot2", "keyword": "音乐"},
             },
+            {
+                "type": "dingtalk",
+                "config": {"webhook_url": "https://example.com/robot3", "keyword": "网易云"},
+            },
         ]
     )
-    assert channels[0]["config"]["keyword"] == "网易云"
-    assert channels[1]["config"]["keyword"] == "音乐"
+    assert [channel["config"]["keyword"] for channel in channels] == ["NCM", "音乐", "NCM"]
+
+
+def test_send_test_uses_ncm_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(notify, "send_channel", lambda channel, title, content: sent.append((title, content)))
+    notify.send_test({"type": "webhook", "name": "hook", "config": {"url": "https://example.com/hook"}})
+    assert sent[0][0] == "NCM 云盘同步 · 测试通知"
 
 
 def test_webhook_payload(monkeypatch: pytest.MonkeyPatch) -> None:

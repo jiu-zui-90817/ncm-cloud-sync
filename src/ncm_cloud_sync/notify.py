@@ -18,6 +18,10 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+APP_NAME = "NCM 云盘同步"
+DEFAULT_DINGTALK_KEYWORD = "NCM"
+LEGACY_DINGTALK_KEYWORD = "网易云"
+
 ALLOWED_TYPES = (
     "telegram",
     "bark",
@@ -116,8 +120,11 @@ def normalize_channels(value: Any) -> list[dict[str, Any]]:
             field_value = _text(raw_config.get(field))
             if field_value:
                 config[field] = field_value
-        if channel_type == "dingtalk" and not config.get("keyword"):
-            config["keyword"] = "网易云"
+        if channel_type == "dingtalk":
+            if not config.get("keyword"):
+                config["keyword"] = DEFAULT_DINGTALK_KEYWORD
+            elif config["keyword"].strip() == LEGACY_DINGTALK_KEYWORD:
+                config["keyword"] = DEFAULT_DINGTALK_KEYWORD
         enabled = bool(item.get("enabled", True))
         label = _text(item.get("name")) or TYPE_LABELS[channel_type]
         if enabled:
@@ -346,7 +353,7 @@ def _send_smtp(config: dict[str, Any], title: str, content: str, label: str) -> 
 
 
 def send_test(channel: dict[str, Any]) -> None:
-    send_channel(channel, "网易云云盘任务 · 测试通知", "这是一条测试通知，收到即表示通知渠道配置可用。")
+    send_channel(channel, f"{APP_NAME} · 测试通知", "这是一条测试通知，收到即表示通知渠道配置可用。")
 
 
 def _stat(stats: Any, name: str, default: Any = 0) -> Any:
@@ -390,10 +397,10 @@ def notify_run(
         return []
 
     titles = {
-        "success": "网易云云盘任务完成",
-        "failure": "网易云云盘任务有失败",
-        "paused": "网易云云盘任务已暂停",
-        "stopped": "网易云云盘任务已终止",
+        "success": f"{APP_NAME}任务完成",
+        "failure": f"{APP_NAME}任务有失败",
+        "paused": f"{APP_NAME}任务已暂停",
+        "stopped": f"{APP_NAME}任务已终止",
     }
     title = titles[event]
     scanned = int(_stat(stats, "scanned", 0) or 0)

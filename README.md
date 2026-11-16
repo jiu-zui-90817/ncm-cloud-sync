@@ -371,7 +371,7 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `gotify` | `server`, `token` | 可选 `priority` |
 | `discord` | `webhook_url` | Discord Webhook |
 | `slack` | `webhook_url` | Slack Incoming Webhook |
-| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`keyword` 自定义关键词（默认“网易云”）、`at_mobiles` 被 @ 手机号 |
+| `dingtalk` | `webhook_url` | 钉钉自定义机器人；可选 `secret` 加签、`keyword` 自定义关键词（默认“NCM”）、`at_mobiles` 被 @ 手机号 |
 | `serverchan` | `sendkey` | Server酱 |
 | `pushplus` | `token` | PushPlus |
 | `pushover` | `token`, `user` | Pushover |
@@ -379,7 +379,7 @@ Web UI 的「通知」页可以添加多个渠道，每个渠道有启用开关�
 | `webhook` | `url` | 通用 JSON POST |
 | `smtp` | `host`, `mail_from`, `mail_to` | SMTP 邮件；可选 `port`、`username`、`password`、`security` |
 
-钉钉机器人安全设置：加签填 `secret`；自定义关键词填 `keyword`（多个用逗号分隔，消息不含关键词时程序会自动补上第一个；不填时默认“网易云”）；IP 地址段白名单要在钉钉侧填 NAS 的出口公网 IP，程序无法代填。钉钉若同时启用关键词和加签，两者都要满足。
+钉钉机器人安全设置：加签填 `secret`；自定义关键词填 `keyword`（多个用逗号分隔，消息不含关键词时程序会自动补上第一个；不填时默认“NCM”；旧版保存的默认值“网易云”会在读取时迁移为“NCM”）；IP 地址段白名单要在钉钉侧填 NAS 的出口公网 IP，程序无法代填。钉钉若同时启用关键词和加签，两者都要满足。
 
 成功通知默认只在有上传或补建文件时发送；只有跳过或空跑时不推送。失败、暂停、终止仍按 `notify_on` 发送，需要空跑也通知时在通知页勾选或设置 `notify_empty: true`。
 

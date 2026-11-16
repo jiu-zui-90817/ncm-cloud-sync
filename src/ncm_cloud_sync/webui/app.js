@@ -997,7 +997,7 @@
       type: type,
       name: meta.label || type,
       enabled: true,
-      config: type === "dingtalk" ? { keyword: "网易云" } : {}
+      config: type === "dingtalk" ? { keyword: "NCM" } : {}
     });
     state.notifyDirty = true;
     renderNotifications();
