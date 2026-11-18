@@ -552,7 +552,8 @@ class Syncer:
             # 不然仅扫描会一直显示待上传，而普通同步永远走 up_to_date 分支。
             if record_md5 and record_md5 in self._cloud_md5:
                 stats.up_to_date += 1
-                self._post_sync(audio, record_md5, stats)
+                # 同步后处理只针对本次真正上传或补建的文件；已存在/未变更
+                # 的文件不能被删除或移动，否则开启 delete 会误删整个音乐库。
                 return
             logger.info("本地记录显示已上传，但云盘没有对应 MD5，重新核对: %s", audio.path)
 
@@ -644,7 +645,6 @@ class Syncer:
                 "skip_remote",
                 {"path": str(audio.path), "song_id": cloud_song_id},
             )
-            self._post_sync(audio, md5, stats)
             return
 
         free = self._free_capacity(stats)
@@ -690,7 +690,6 @@ class Syncer:
                 {"path": str(audio.path), "song_id": result.song_id},
             )
             self._cloud_md5[str(md5).lower()] = result.song_id or 0
-            self._post_sync(audio, md5, stats)
             return
 
         if result.reason == "linked":
@@ -739,6 +738,7 @@ class Syncer:
         self._post_sync(audio, md5, stats)
 
     def _post_sync(self, audio: AudioFile, md5: str, stats: SyncStats) -> None:
+        """只在上传成功或补建云盘条目后调用，不处理 up_to_date/skipped_remote。"""
         action = (self.config.post_sync_action or "none").lower()
         if action == "none":
             return

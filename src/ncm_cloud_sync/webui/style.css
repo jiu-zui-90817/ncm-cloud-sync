@@ -528,6 +528,7 @@ h2 {
 }
 
 input[type="number"],
+input[type="text"],
 select,
 textarea {
   width: 100%;
@@ -549,6 +550,7 @@ textarea {
 }
 
 input[type="number"]:focus,
+input[type="text"]:focus,
 select:focus,
 textarea:focus {
   border-color: #f0a6b1;

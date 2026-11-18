@@ -562,6 +562,91 @@ def test_post_sync_move_archives_local_file(tmp_path: Path) -> None:
         assert str(archive / "a.mp3") in (record.last_error or "")
 
 
+def test_post_sync_delete_keeps_already_uploaded_file(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        config.post_sync_action = "delete"
+        stats = Syncer(config, client, state).run_once()
+        assert stats.up_to_date == 1
+        assert stats.deleted == 0
+        assert target.exists()
+        record = state.get(target)
+        assert record is not None and record.status == "uploaded"
+
+
+def test_post_sync_move_keeps_already_uploaded_file(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = tmp_path / "archive"
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        config.post_sync_action = "move"
+        config.move_target = archive
+        stats = Syncer(config, client, state).run_once()
+        assert stats.up_to_date == 1
+        assert stats.moved_after_sync == 0
+        assert target.exists()
+        assert not archive.exists()
+
+
+def test_post_sync_delete_does_not_touch_remote_duplicate(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    md5 = hashlib.md5(b"a" * 100).hexdigest()
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "delete"
+    client = FakeClient(cloud={md5: 7})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.skipped_remote == 1
+        assert stats.deleted == 0
+        assert target.exists()
+
+
+def test_post_sync_delete_does_not_touch_remote_exists_file(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "delete"
+    client = FakeClient({"a.mp3": UploadResult(False, song_id=7, reason="remote_exists")})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.skipped_remote == 1
+        assert stats.deleted == 0
+        assert target.exists()
+
+
+def test_post_sync_delete_removes_linked_file(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "delete"
+    client = FakeClient({"a.mp3": UploadResult(False, song_id=7, reason="linked")})
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+        assert stats.linked == 1
+        assert stats.deleted == 1
+        assert not target.exists()
+        record = state.get(target)
+        assert record is not None and record.status == "deleted"
+
+
 def test_archive_inside_music_dir_is_not_scanned_again(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

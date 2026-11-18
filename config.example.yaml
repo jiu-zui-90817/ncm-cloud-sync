@@ -70,7 +70,8 @@ max_upload_size: 0
 # 自动同步开关。false 时只运行手动同步，后台调度不会自动触发。
 auto_sync: true
 
-# 同步成功后如何处理本地文件：none（不处理）/ delete（删除）/ move（移动）。
+# 本次上传成功或补建云盘条目后如何处理本地文件：none（不处理）/ delete（删除）/ move（移动）。
+# 只处理本次上传/补建成功的文件；已存在、未变更或云端已存在的文件不会处理。
 # 默认 none。启用 delete 或 move 时，若未显式写 check_missing，会默认关闭本地缺失校验。
 post_sync_action: none
 
