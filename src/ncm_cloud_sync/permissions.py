@@ -1,14 +1,16 @@
 """音乐目录权限体检。
 
 应用以 ncm-cloud-sync 包用户运行，通常拿不到下载器新建文件的 600 权限。
-这里只做只读检查并生成修复命令，不会修改 ACL，也不会提权。
+这里只做只读检查并给出飞牛文件管理里的授权建议，不会修改 ACL，也不会提权。
+
+飞牛自己的 ACL 不继承 Linux ACL，setfacl/default ACL 对下载器 rename 进来的
+文件无效，因此不再生成 setfacl 命令，统一引导用户在文件管理界面授权。
 """
 
 from __future__ import annotations
 
 import getpass
 import os
-import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,14 +42,6 @@ def _can_read_dir(path: Path) -> bool:
 
 def _can_read_file(path: Path) -> bool:
     return os.access(path, os.R_OK)
-
-
-def _acl_commands(root: Path, user: str) -> list[str]:
-    quoted = shlex.quote(str(root))
-    return [
-        f"setfacl -R -m u:{user}:rX {quoted}",
-        f"find {quoted} -type d -exec setfacl -d -m u:{user}:rX {{}} +",
-    ]
 
 
 def _sample(report: dict[str, Any], path: str, kind: str, error: str) -> None:
@@ -88,12 +82,13 @@ def audit_permissions(
         "directories": [],
         "truncated": False,
         "limit": int(max_files),
-        "commands": [],
+        "guidance": [],
         "notes": [
             "这里只检查配置的音乐目录中的音频文件，不会修改任何权限。",
-            "修复命令需要以 root 执行；执行前请确认路径。",
+            "请在飞牛文件管理里给应用账号授权；Linux setfacl 的默认 ACL "
+            "不会被子级自动继承，不能作为可靠修复方式。",
             "如果下载器以 600/umask 077 写入，新增文件仍可能不可读；"
-            "建议把下载器 umask 改为 022，或在下载完成钩子里单独执行 setfacl。",
+            "建议把下载器 umask 改为 022，或在下载完成钩子里单独授权。",
         ],
     }
     if not roots:
@@ -212,16 +207,22 @@ def audit_permissions(
         and all(item.get("exists") for item in report["directories"])
     )
 
-    commands: list[str] = []
-    for info in report["directories"]:
-        if not info.get("exists"):
-            continue
-        if (
-            info["unreadable_files"]
-            or info["unreadable_dirs"]
-            or not info["readable"]
-        ):
-            commands.extend(_acl_commands(Path(info["path"]), user))
-    # 同一目录可能因为父目录不可读而被重复加入，去重但保持顺序。
-    report["commands"] = list(dict.fromkeys(commands))
+    affected = [
+        str(info["path"])
+        for info in report["directories"]
+        if info.get("exists") and (info["unreadable_files"] or info["unreadable_dirs"])
+    ]
+    if affected or not report["ok"]:
+        guidance = [
+            "打开飞牛文件管理，进入下面这些目录（或选中对应文件）。",
+            "在“权限设置 / 编辑权限”里添加应用账号 "
+            f"{user}，至少授予读取权限：遍历文件夹/执行文件、"
+            "列出文件夹/读取数据、读取属性。",
+            "保存后回到这里重新点“开始体检”。",
+            "如果新下载的文件仍然无权限，请把下载器的 umask 改为 022；"
+            "飞牛 ACL 不继承 Linux 默认 ACL，setfacl 不能可靠修复。",
+        ]
+        if affected:
+            guidance.insert(0, "需要授权的目录：" + "、".join(affected))
+        report["guidance"] = guidance
     return report

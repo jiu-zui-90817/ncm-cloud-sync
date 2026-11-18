@@ -104,6 +104,9 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["stats"]["total"] == 0
     assert data["settings"]["music_dirs"] == [str(app.config.music_dirs[0])]
     assert data["settings"]["exclude_dirs"] == []
+    assert data["settings"]["post_sync_action"] == "none"
+    assert data["settings"]["move_target"] == ""
+    assert data["settings"]["check_missing"] is True
     assert data["sync"]["state"] == "idle"
     assert data["sync"]["can_pause"] is False
     assert data["runs"] == []
@@ -186,6 +189,80 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
     assert saved["log_level"] == "DEBUG"
+
+
+def test_settings_post_sync_delete_disables_missing_by_default(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    music = app.config.music_dirs[0]
+    status, _, data = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(music)],
+            "post_sync_action": "delete",
+            "interval": 1800,
+        },
+    )
+    assert status == "200 OK"
+    assert data["ok"] is True
+    assert app.config.post_sync_action == "delete"
+    assert app.config.check_missing is False
+    saved = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert saved["post_sync_action"] == "delete"
+    assert saved["check_missing"] is False
+
+
+def test_settings_can_reenable_missing_check(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    music = app.config.music_dirs[0]
+    status, _, _ = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(music)],
+            "post_sync_action": "delete",
+            "check_missing": True,
+        },
+    )
+    assert status == "200 OK"
+    assert app.config.check_missing is True
+
+
+def test_settings_move_requires_valid_target(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    music = app.config.music_dirs[0]
+    base = {"music_dirs": [str(music)], "post_sync_action": "move"}
+
+    status, _, data = call(app, "/api/settings", method="PUT", body=base)
+    assert status == "400 Bad Request"
+    assert "移动目录" in data["error"]
+
+    status, _, data = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={**base, "move_target": "relative/archive"},
+    )
+    assert status == "400 Bad Request"
+    assert "绝对路径" in data["error"]
+
+    inside = music / "archive"
+    status, _, data = call(
+        app, "/api/settings", method="PUT", body={**base, "move_target": str(inside)}
+    )
+    assert status == "400 Bad Request"
+    assert "不能位于音乐目录内" in data["error"]
+
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    status, _, _ = call(
+        app, "/api/settings", method="PUT", body={**base, "move_target": str(archive)}
+    )
+    assert status == "200 OK"
+    assert app.config.move_target == archive
+    assert app.config.check_missing is False
 
 
 def test_settings_reject_missing_directory(tmp_path: Path) -> None:
@@ -688,6 +765,36 @@ def test_files_api_lists_statuses_and_scan_pending(tmp_path: Path) -> None:
     assert status == "400 Bad Request"
 
 
+def test_status_and_files_mask_missing_when_disabled(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    with StateStore(app.config.db_path) as state:
+        state.mark_seen("gone.mp3", 100, 1)
+        state.mark_uploaded("gone.mp3", song_id=1, cloud_name="gone")
+        state.mark_missing("gone.mp3")
+
+    status, _, data = call(app, "/api/status")
+    assert status == "200 OK"
+    assert data["stats"]["missing"] == 1
+
+    status, _, _ = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={"music_dirs": [str(app.config.music_dirs[0])], "check_missing": False},
+    )
+    assert status == "200 OK"
+
+    status, _, data = call(app, "/api/status")
+    assert status == "200 OK"
+    assert data["stats"]["missing"] == 0
+
+    status, _, data = call(app, "/api/files", query="kind=missing")
+    assert status == "200 OK"
+    assert data["disabled"] is True
+    assert data["total"] == 0
+    assert data["counts"]["missing"] == 0
+
+
 def test_permissions_check_api(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     (app.config.music_dirs[0] / "a.mp3").write_bytes(b"a")
@@ -698,7 +805,7 @@ def test_permissions_check_api(tmp_path: Path) -> None:
     assert data["ok"] is True
     assert data["files"] == 1
     assert data["directories"][0]["path"] == str(app.config.music_dirs[0])
-    assert isinstance(data["commands"], list)
+    assert isinstance(data["guidance"], list)
     assert isinstance(data["notes"], list)
 
 

@@ -27,12 +27,12 @@ def test_audit_reports_readable_library(tmp_path: Path, monkeypatch) -> None:
     assert report["dirs"] == 1
     assert report["unreadable_files"] == 0
     assert report["unreadable_dirs"] == 0
-    assert report["commands"] == []
+    assert report["guidance"] == []
     assert report["directories"][0]["path"] == str(root)
     assert report["directories"][0]["readable"] is True
 
 
-def test_audit_flags_unreadable_file_and_builds_commands(
+def test_audit_flags_unreadable_file_and_guides_file_manager(
     tmp_path: Path, monkeypatch
 ) -> None:
     root = _music(tmp_path)
@@ -49,9 +49,12 @@ def test_audit_flags_unreadable_file_and_builds_commands(
     assert report["unreadable_files"] == 1
     assert report["samples"][0]["kind"] == "file"
     assert report["samples"][0]["path"].endswith("a.mp3")
-    assert len(report["commands"]) == 2
-    assert report["commands"][0].startswith("setfacl -R -m u:")
-    assert "-type d -exec setfacl -d -m u:" in report["commands"][1]
+    assert report["guidance"]
+    assert any("需要授权的目录" in line and str(root) in line for line in report["guidance"])
+    assert any(
+        "权限设置" in line and report["user"] in line for line in report["guidance"]
+    )
+    assert all("setfacl" not in line or "不能可靠修复" in line for line in report["guidance"])
 
 
 def test_audit_skips_excluded_dirs(tmp_path: Path, monkeypatch) -> None:
@@ -79,7 +82,7 @@ def test_audit_reports_missing_directory(tmp_path: Path) -> None:
     assert report["ok"] is False
     assert report["unreadable_dirs"] == 1
     assert report["directories"][0]["exists"] is False
-    assert report["commands"] == []
+    assert report["guidance"]
     assert "不存在" in report["samples"][0]["error"]
 
 

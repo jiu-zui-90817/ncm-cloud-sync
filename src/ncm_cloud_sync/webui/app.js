@@ -391,10 +391,25 @@
     el("interval").value = settings.interval || 3600;
     el("rateLimit").value = settings.rate_limit != null ? settings.rate_limit : 1;
     el("autoSync").checked = settings.auto_sync !== false;
+    var action = settings.post_sync_action || "none";
+    el("postSyncAction").value = action;
+    el("moveTarget").value = settings.move_target || "";
+    el("checkMissing").checked = settings.check_missing !== false;
+    el("moveTargetField").classList.toggle("hidden", action !== "move");
     el("logLevel").value = settings.log_level || "INFO";
     el("notifyOn").value = settings.notify_on || "always";
     el("notifyEmpty").checked = settings.notify_empty === true;
     el("intervalLabel").textContent = formatInterval(settings.interval || status.config.interval);
+  }
+
+  function updatePostSyncFields() {
+    var action = el("postSyncAction").value;
+    el("moveTargetField").classList.toggle("hidden", action !== "move");
+    if (action !== "none") {
+      el("checkMissing").checked = false;
+    }
+    state.settingsDirty = true;
+    el("settingsStatus").textContent = "有未保存的修改";
   }
 
   function renderLastRun(sync) {
@@ -730,22 +745,16 @@
       box.appendChild(make("p", "muted", "检查达到上限，结果可能不完整；可以缩短音乐目录后重试。"));
     }
 
-    var commands = data.commands || [];
-    if (commands.length) {
-      var actions = make("div", "actions");
-      actions.appendChild(make("span", "muted", "在 fnOS 以 root 执行："));
-      var copy = make("button", "btn tiny ghost", "复制修复命令");
-      copy.type = "button";
-      copy.addEventListener("click", function () {
-        copyText(commands.join("\n")).then(function () {
-          showToast("修复命令已复制");
-        }).catch(function (error) {
-          showToast(error.message, true);
-        });
+    var guidance = data.guidance || [];
+    if (guidance.length) {
+      var guideBox = make("div", "permission-guidance");
+      guideBox.appendChild(make("p", "permission-guidance-title", "请在飞牛文件管理里授权："));
+      var guideList = make("ul", "permission-guidance-list");
+      guidance.forEach(function (line) {
+        guideList.appendChild(make("li", "", line));
       });
-      actions.appendChild(copy);
-      box.appendChild(actions);
-      box.appendChild(make("pre", "permission-commands", commands.join("\n")));
+      guideBox.appendChild(guideList);
+      box.appendChild(guideBox);
     } else if (ok) {
       box.appendChild(make("p", "muted", "应用账号可以读取当前配置的音乐目录，无需处理。"));
     }
@@ -1189,6 +1198,9 @@
     ignored: "已忽略",
     missing: "本地缺失",
     moved: "已移动",
+    deleted: "已删除本地",
+    moved_after_sync: "已移动本地",
+    post_action_failed: "同步后处理失败",
     deferred: "待续",
     to_upload: "待上传",
     cloud_only: "云端独有",
@@ -1283,7 +1295,7 @@
     el("runDetailSummary").textContent = (run.started_at ? formatRunTime(run.started_at) + " · " : "") + runSummaryText(run, stats);
     var chips = el("runDetailChips");
     chips.textContent = "";
-    var order = ["all", "uploaded", "linked", "skipped_remote", "skipped_local", "planned", "failed", "permission", "ignored", "missing", "moved", "deferred", "to_upload", "cloud_only", "duplicate_local"];
+    var order = ["all", "uploaded", "linked", "skipped_remote", "skipped_local", "planned", "failed", "permission", "ignored", "missing", "moved", "deleted", "moved_after_sync", "post_action_failed", "deferred", "to_upload", "cloud_only", "duplicate_local"];
     var counts = detail.counts || {};
     var allCount = Object.keys(counts).reduce(function (sum, key) {
       return sum + (counts[key] || 0);
@@ -1537,6 +1549,9 @@
       interval: Number(el("interval").value),
       rate_limit: Number(el("rateLimit").value),
       auto_sync: el("autoSync").checked,
+      post_sync_action: el("postSyncAction").value,
+      move_target: el("moveTarget").value.trim(),
+      check_missing: el("checkMissing").checked,
       log_level: el("logLevel").value,
       notify_on: el("notifyOn").value,
       notify_empty: el("notifyEmpty").checked,
@@ -1654,6 +1669,7 @@
     el("refreshAccount").addEventListener("click", refreshAccount);
     el("refreshLogs").addEventListener("click", loadLogs);
     el("settingsForm").addEventListener("submit", saveSettings);
+    el("postSyncAction").addEventListener("change", updatePostSyncFields);
     el("settingsForm").addEventListener("input", function () {
       state.settingsDirty = true;
       el("settingsStatus").textContent = "有未保存的修改";

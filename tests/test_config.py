@@ -72,6 +72,44 @@ def test_notify_empty_yaml_and_env(tmp_path: Path) -> None:
     assert Config.load(config, env={"NCM_CLOUD_SYNC_NOTIFY_EMPTY": "false"}).notify_empty is False
 
 
+def test_post_sync_defaults_and_delete_disables_missing(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    default = Config.load(write_config(tmp_path, music), env={})
+    assert default.post_sync_action == "none"
+    assert default.move_target is None
+    assert default.check_missing is True
+
+    deleting = Config.load(
+        write_config(tmp_path, music, "post_sync_action: delete\n"), env={}
+    )
+    assert deleting.post_sync_action == "delete"
+    assert deleting.check_missing is False
+
+    explicit = Config.load(
+        write_config(
+            tmp_path,
+            music,
+            "post_sync_action: delete\ncheck_missing: true\n",
+        ),
+        env={},
+    )
+    assert explicit.check_missing is True
+
+
+def test_move_target_must_be_outside_music_dirs(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    inside = music / "archive"
+    config = write_config(
+        tmp_path,
+        music,
+        f"post_sync_action: move\nmove_target: {inside}\n",
+    )
+    with pytest.raises(ConfigError, match="不能位于音乐目录内"):
+        Config.load(config, env={})
+
+
 def test_parse_bool() -> None:
     assert parse_bool("yes") is True
     assert parse_bool("off") is False

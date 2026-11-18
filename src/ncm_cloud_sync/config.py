@@ -89,6 +89,9 @@ class Config:
     exclude: tuple[str, ...] = (".*", "@eaDir", "#recycle", "lost+found")
     exclude_dirs: tuple[Path, ...] = ()
     auto_sync: bool = True
+    post_sync_action: str = "none"
+    move_target: Path | None = None
+    check_missing: bool = True
     notify_on: str = "always"
     notify_empty: bool = False
     notify_channels: tuple[dict[str, Any], ...] = ()
@@ -135,6 +138,9 @@ class Config:
             "exclude": list(self.exclude),
             "exclude_dirs": [str(path) for path in self.exclude_dirs],
             "auto_sync": self.auto_sync,
+            "post_sync_action": self.post_sync_action,
+            "move_target": str(self.move_target) if self.move_target else None,
+            "check_missing": self.check_missing,
             "notify_on": self.notify_on,
             "notify_empty": self.notify_empty,
             "notify_channels": mask_channels(self.notify_channels),
@@ -190,6 +196,14 @@ class Config:
             )
         if "auto_sync" in raw:
             values["auto_sync"] = parse_bool(raw["auto_sync"], True)
+        if "post_sync_action" in raw:
+            values["post_sync_action"] = (
+                str(raw["post_sync_action"] or "none").strip().lower()
+            )
+        if "move_target" in raw and raw["move_target"]:
+            values["move_target"] = _resolve_path(raw["move_target"], base)
+        if "check_missing" in raw:
+            values["check_missing"] = parse_bool(raw["check_missing"], True)
         if "notify_on" in raw:
             values["notify_on"] = str(raw["notify_on"]).strip().lower()
         if "notify_empty" in raw:
@@ -204,6 +218,15 @@ class Config:
         for key, value in overrides.items():
             if value is not None:
                 values[key] = value
+
+        action = str(values.get("post_sync_action", cls.post_sync_action)).strip().lower()
+        values["post_sync_action"] = action
+        if values.get("move_target") is not None:
+            values["move_target"] = Path(str(values["move_target"])).expanduser()
+        # 开启“同步后删除/移动”但配置里没有显式写 check_missing 时，
+        # 默认不再校验本地缺失；显式 true 仍然尊重用户选择。
+        if "check_missing" not in values:
+            values["check_missing"] = action == "none"
 
         config = cls(**values)
         config.config_path = yaml_path
@@ -297,6 +320,15 @@ class Config:
         auto_sync = text("NCM_CLOUD_SYNC_AUTO_SYNC")
         if auto_sync is not None:
             values["auto_sync"] = parse_bool(auto_sync, True)
+        post_sync_action = text("NCM_CLOUD_SYNC_POST_SYNC_ACTION")
+        if post_sync_action:
+            values["post_sync_action"] = post_sync_action.lower()
+        move_target = text("NCM_CLOUD_SYNC_MOVE_TARGET")
+        if move_target:
+            values["move_target"] = _resolve_path(move_target, base)
+        check_missing = text("NCM_CLOUD_SYNC_CHECK_MISSING")
+        if check_missing is not None:
+            values["check_missing"] = parse_bool(check_missing, True)
         notify_on = text("NCM_CLOUD_SYNC_NOTIFY_ON")
         if notify_on:
             values["notify_on"] = notify_on.lower()
@@ -332,6 +364,19 @@ class Config:
             raise ConfigError("rate_limit 不能为负数")
         if self.retries < 0:
             raise ConfigError("retries 不能为负数")
+        if self.post_sync_action not in {"none", "delete", "move"}:
+            raise ConfigError("post_sync_action 必须是 none/delete/move")
+        if self.post_sync_action == "move":
+            if self.move_target is None:
+                raise ConfigError("同步后移动需要配置 move_target")
+            if not self.move_target.is_absolute():
+                raise ConfigError(f"移动目录必须是绝对路径: {self.move_target}")
+            for root in self.music_dirs:
+                try:
+                    self.move_target.relative_to(root)
+                except ValueError:
+                    continue
+                raise ConfigError(f"移动目录不能位于音乐目录内: {self.move_target}")
         for directory in self.exclude_dirs:
             if not directory.is_absolute():
                 raise ConfigError(f"排除目录必须是绝对路径: {directory}")

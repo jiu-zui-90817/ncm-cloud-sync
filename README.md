@@ -1,6 +1,6 @@
 # NCM Cloud Sync
 
-把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用。内置 Web UI，支持扫码登录、本地与云端双重去重、仅扫描对账、运行历史、权限体检和云盘容量校验。
+把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用。内置 Web UI，支持扫码登录、本地与云端双重去重、仅扫描对账、运行历史、同步后处理、权限体检和云盘容量校验。
 
 > 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端整理出的 weapi / eapi / NOS 上传链路，接口随时可能变化。使用前请先看[风险与限制](#风险与限制)。
 
@@ -18,7 +18,8 @@
 - **仅扫描对账**：只读扫描本地目录和云盘列表，显示待上传、已匹配、本地重复和云端独有，不写同步状态、不上传。
 - **运行历史**：保留最近 5 次有同步结果的执行记录，可点开查看逐文件结果；空跑和更早的记录自动清理。
 - **统计明细**：已上传、待处理、本地缺失、跳过/重复都可以点开查看逐文件列表。
-- **权限体检**：检查应用账号能否读取音乐目录，列出无权限的文件和目录示例，并生成 `setfacl` 修复命令。
+- **权限体检**：检查应用账号能否读取音乐目录，列出无权限的文件和目录示例，并引导到飞牛文件管理里给应用账号授权。
+- **同步后处理**：可选在确认云盘已有文件后删除本地文件，或移动到指定目录；默认不处理。
 - **云盘容量**：账号卡显示已用 / 总量 / 剩余和占用比例；上传前校验剩余空间。
 - **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉、Server酱、PushPlus、Pushover、PushDeer、Webhook 和 SMTP；默认只在有上传或补建时通知，空跑可单独开启。
 - **自动同步开关**：可以关闭后台自动同步，只保留手动执行。
@@ -45,7 +46,7 @@
 
 去重顺序是“先本地、再云盘列表、最后云端字节”。`needUpload=false` 只代表文件字节已经在网易云对象存储里，不代表云盘列表已经有条目，因此程序仍会调用 info/v2 和 pub/v2 补建云盘条目。这一步不申请上传 token、不上传新字节，也不增加上传数或上传字节数，单独显示为“补建”。
 
-统计口径：先扫描出本地候选数（scanned），再逐文件处理（processed）；被扩展名、排除目录、大小或权限过滤的文件不计入 scanned，而是在“本地过滤”里单列。云盘列表每轮开始读取一次，转成内存中的 MD5 到 songId 映射；本地状态在 SQLite 中，逐文件对照后决定跳过或上传；本地记录显示“已上传”时也会确认该 MD5 仍在云盘列表中，云盘条目被删除或替换后会重新核对。概览里的统计卡可以点开查看逐文件明细；“待处理”在最近一次仅扫描后显示该次扫描的待上传文件。
+统计口径：先扫描出本地候选数（scanned），再逐文件处理（processed）；被扩展名、排除目录、大小或权限过滤的文件不计入 scanned，而是在“本地过滤”里单列。云盘列表每轮开始读取一次，转成内存中的 MD5 到 songId 映射；本地状态在 SQLite 中，逐文件对照后决定跳过或上传；本地记录显示“已上传”时也会确认该 MD5 仍在云盘列表中，云盘条目被删除或替换后会重新核对。概览里的统计卡可以点开查看逐文件明细；“待处理”在最近一次仅扫描后显示该次扫描的待上传文件。启用同步后处理时，删除和移动分别计入“已删除本地”“已移动本地”。
 
 ## 安装
 
@@ -150,17 +151,9 @@ bash scripts/build-fnos.sh
 
 应用以包用户 `ncm-cloud-sync` 运行，不是音乐文件的属主。文件由其他下载器或用户创建、权限为 600 时，应用无法读取。
 
-先到「文件问题 → 权限体检」点「开始体检」，页面会列出无权限的文件和目录示例，并生成修复命令。也可以在应用中心给本应用授权音乐目录，或在文件管理里给 `ncm-cloud-sync` 增加读取权限。
+飞牛自身的 ACL 不继承 Linux ACL，`setfacl` 对下载器先写临时文件再 rename 的文件也不可靠，因此程序不再生成或提供修复命令。请到「文件问题 → 权限体检」点「开始体检」，按页面列出的目录到「文件管理 → 权限设置 / 编辑权限」给 `ncm-cloud-sync` 增加读取权限；也可以在应用中心给本应用授权音乐目录。
 
-需要在 fnOS 上以 root 执行时，可以使用页面生成的命令，例如：
-
-```bash
-MUSIC=/vol1/1000/Music
-sudo setfacl -R -m u:ncm-cloud-sync:rX "$MUSIC"
-sudo find "$MUSIC" -type d -exec setfacl -d -m u:ncm-cloud-sync:rX {} +
-```
-
-第一条给现有文件和目录增加读取权限，第二条给目录增加默认 ACL，让以后新建的文件继承权限。如果下载器强制使用 600 或 umask 077，默认 ACL 可能被覆盖；需要把下载器 umask 调整为 022/002，或在下载完成钩子里重新执行 `setfacl`。授权后点“重置并重试”让失败文件重新排队。
+授权后点“重置并重试”让失败文件重新排队。若下载器仍用 600 或 umask 077 创建文件，可把下载器 umask 调整为 022/002。应用本身没有 root，不能自动修改其他用户创建的文件的权限。
 
 ## 数据与备份
 
@@ -243,7 +236,7 @@ sudo rm -rf /var/apps/ncm-cloud-sync/var
 
 **很多文件提示没有读取权限**
 
-到「文件问题 → 权限体检」点「开始体检」，按页面生成的 `setfacl` 命令修复，或在应用中心重新授权音乐目录。授权后点“重置并重试”。
+到「文件问题 → 权限体检」点「开始体检」，按页面列出的目录到「文件管理 → 权限设置」给 `ncm-cloud-sync` 增加读取权限，或在应用中心重新授权音乐目录。授权后点“重置并重试”。
 
 **同步失败 / 上传时提示 [400] 参数错误**
 
@@ -275,7 +268,7 @@ sudo rm -rf /var/apps/ncm-cloud-sync/var
 
 **“本地缺失”是什么？文件移动后还会缺失吗**
 
-“本地缺失”记录的是上次同步过、这次扫描不到的本地文件。文件移动或改名后，旧路径会改记为“已移动”，新路径按 MD5 复用原记录，不会再显示缺失，也不会重复上传；升级前已经标记缺失的记录，只要新路径的 MD5 匹配，也会自动改为“已移动”。只有真正删除的文件才继续标记缺失。标记缺失不会删除云盘里的歌曲。
+“本地缺失”现在只相对于云盘判断：上次同步过、云盘里仍有该 MD5，但这次扫描不到本地文件，才提示缺失。文件移动或改名后，旧路径会改记为“已移动”，新路径按 MD5 复用原记录，不会再显示缺失，也不会重复上传；升级前已经标记缺失的记录，只要新路径的 MD5 匹配，也会自动改为“已移动”。如果本地和云端都已删除，记录会改记为“已删除”，不再提示缺失。启用同步后删除/移动时默认不再检查本地缺失，也可以在设置里手动开启。标记缺失不会删除云盘里的歌曲。
 
 **云盘有 563 首，为什么任务只扫描到 533 首**
 
@@ -342,6 +335,9 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 | `exclude` | `.*`, `@eaDir`, `#recycle`, `lost+found` | 跳过的目录 / 文件通配符 |
 | `exclude_dirs` | `[]` | 整棵跳过的绝对目录，必须位于某个音乐目录内；Web UI 里叫“排除目录” |
 | `auto_sync` | `true` | 是否启用后台自动同步；`false` 时只手动同步 |
+| `post_sync_action` | `none` | 同步成功后处理本地文件：`none` / `delete` / `move`；启用 delete/move 时未显式配置 `check_missing` 则默认 `false` |
+| `move_target` | `null` | `move` 的绝对目标目录，不能位于音乐目录内；不存在会自动创建 |
+| `check_missing` | `true` | 是否检查本地缺失；关闭后概览和明细不显示本地缺失 |
 | `notify_on` | `always` | 通知时机：`always` / `failure` / `success` / `never` |
 | `notify_empty` | `false` | 空跑（没有上传或补建文件）时也通知；失败、暂停、终止不受影响 |
 | `notify_channels` | `[]` | 通知渠道列表，见下文 |
@@ -355,7 +351,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 
 环境变量优先级高于 YAML，低于命令行参数。支持：
 
-`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_EMPTY`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
+`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_POST_SYNC_ACTION`、`NCM_CLOUD_SYNC_MOVE_TARGET`、`NCM_CLOUD_SYNC_CHECK_MISSING`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_EMPTY`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
 
 `NCM_CLOUD_SYNC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`NCM_CLOUD_SYNC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
 
@@ -443,7 +439,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、上传前预检、缺失文件、扫码登录、Web API、通知、更新检查、容量校验和权限体检。
+测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、上传前预检、同步后删除/移动、缺失语义、扫码登录、Web API、通知、更新检查、容量校验和权限体检。
 
 构建飞牛原生应用：
 

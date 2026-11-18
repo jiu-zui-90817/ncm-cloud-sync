@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -58,6 +59,9 @@ class SyncStats:
     ignored: int = 0
     missing: int = 0
     moved: int = 0
+    deleted: int = 0
+    moved_after_sync: int = 0
+    post_action_failed: int = 0
     bytes_uploaded: int = 0
     capacity_total: int = 0
     capacity_used: int = 0
@@ -130,6 +134,17 @@ class SyncStats:
             + (f"，扫描过滤 {self.filtered}" if self.filtered else "")
             + f"，缺失 {self.missing}"
             + (f"，已移动 {self.moved}" if self.moved else "")
+            + (f"，已删除本地 {self.deleted}" if self.deleted else "")
+            + (
+                f"，已移动本地 {self.moved_after_sync}"
+                if self.moved_after_sync
+                else ""
+            )
+            + (
+                f"，同步后处理失败 {self.post_action_failed}"
+                if self.post_action_failed
+                else ""
+            )
             + f"，上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
             + (
@@ -210,6 +225,9 @@ class Syncer:
             or stats.failed
             or stats.missing
             or stats.moved
+            or stats.deleted
+            or stats.moved_after_sync
+            or stats.post_action_failed
             or stats.deferred
         )
 
@@ -276,7 +294,8 @@ class Syncer:
         if not callable(loader):
             raise NcmSyncError("客户端不支持读取云盘列表")
         try:
-            self._cloud_md5 = dict(loader() or {})
+            raw = dict(loader() or {})
+            self._cloud_md5 = {str(key).lower(): value for key, value in raw.items()}
         except Exception as exc:
             raise NcmSyncError(f"读取云盘列表失败：{exc}") from exc
         stats.cloud_songs = int(
@@ -504,7 +523,8 @@ class Syncer:
                         self.state.mark_failed(audio.path, str(exc))
                     except Exception:
                         logger.exception("写入失败状态时出错: %s", audio.path)
-            self._check_missing(known, stats)
+            if self.config.check_missing:
+                self._check_missing(known, stats)
         except AuthError as exc:
             stats.duration = time.monotonic() - started
             stats.error = str(exc)
@@ -531,6 +551,7 @@ class Syncer:
             # 不然仅扫描会一直显示待上传，而普通同步永远走 up_to_date 分支。
             if record_md5 and record_md5 in self._cloud_md5:
                 stats.up_to_date += 1
+                self._post_sync(audio, record_md5, stats)
                 return
             logger.info("本地记录显示已上传，但云盘没有对应 MD5，重新核对: %s", audio.path)
 
@@ -622,6 +643,7 @@ class Syncer:
                 "skip_remote",
                 {"path": str(audio.path), "song_id": cloud_song_id},
             )
+            self._post_sync(audio, md5, stats)
             return
 
         free = self._free_capacity(stats)
@@ -666,6 +688,8 @@ class Syncer:
                 "skip_remote",
                 {"path": str(audio.path), "song_id": result.song_id},
             )
+            self._cloud_md5[str(md5).lower()] = result.song_id or 0
+            self._post_sync(audio, md5, stats)
             return
 
         if result.reason == "linked":
@@ -687,6 +711,8 @@ class Syncer:
                 "linked",
                 {"path": str(audio.path), "song_id": result.song_id},
             )
+            self._cloud_md5[str(md5).lower()] = result.song_id or 0
+            self._post_sync(audio, md5, stats)
             return
 
         stats.uploaded += 1
@@ -708,6 +734,101 @@ class Syncer:
             "uploaded",
             {"path": str(audio.path), "song_id": result.song_id, "size": audio.size},
         )
+        self._cloud_md5[str(md5).lower()] = result.song_id or 0
+        self._post_sync(audio, md5, stats)
+
+    def _post_sync(self, audio: AudioFile, md5: str, stats: SyncStats) -> None:
+        action = (self.config.post_sync_action or "none").lower()
+        if action == "none":
+            return
+        if action not in {"delete", "move"}:
+            logger.warning("未知的同步后处理方式: %s", action)
+            return
+        key = str(md5 or "").lower()
+        if not key or key not in self._cloud_md5:
+            logger.info("同步后处理已跳过：云盘尚未确认该文件: %s", audio.path)
+            return
+        path = Path(audio.path)
+        try:
+            current = path.stat()
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            self._post_action_failed(path, action, exc, stats, audio.size)
+            return
+        if current.st_size != audio.size or current.st_mtime_ns != audio.mtime_ns:
+            logger.info("同步后处理已跳过：文件在扫描后发生变化: %s", path)
+            return
+        try:
+            if action == "delete":
+                path.unlink()
+                stats.deleted += 1
+                self.state.mark_deleted(path)
+                self._record(
+                    "deleted",
+                    path=path,
+                    name=path.name,
+                    size=audio.size,
+                    detail="已确认在云端，删除本地文件",
+                )
+                logger.info("已确认在云端，删除本地文件: %s", path)
+                self._notify("deleted", {"path": str(path), "size": audio.size})
+            else:
+                target = self._move_target_for(path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(path), str(target))
+                stats.moved_after_sync += 1
+                self.state.mark_archived(path, target)
+                self._record(
+                    "moved_after_sync",
+                    path=path,
+                    name=path.name,
+                    size=audio.size,
+                    detail=f"已确认在云端，移动到 {target}",
+                )
+                logger.info("已确认在云端，移动本地文件: %s -> %s", path, target)
+                self._notify(
+                    "moved_after_sync",
+                    {"path": str(path), "target": str(target), "size": audio.size},
+                )
+        except Exception as exc:
+            self._post_action_failed(path, action, exc, stats, audio.size)
+
+    def _post_action_failed(
+        self,
+        path: Path,
+        action: str,
+        exc: BaseException,
+        stats: SyncStats,
+        size: int,
+    ) -> None:
+        stats.post_action_failed += 1
+        detail = f"同步后{'删除' if action == 'delete' else '移动'}失败：{exc}"
+        self._record(
+            "post_action_failed",
+            path=path,
+            name=path.name,
+            size=size,
+            detail=detail,
+        )
+        logger.warning("%s: %s", detail, path)
+
+    def _move_target_for(self, path: Path) -> Path:
+        if self.config.move_target is None:
+            raise OSError("未配置同步后移动目录")
+        target_dir = Path(self.config.move_target)
+        if not target_dir.is_absolute():
+            raise OSError("同步后移动目录必须是绝对路径")
+        if self._under_music_dirs(target_dir):
+            raise OSError("同步后移动目录不能位于音乐目录内")
+        candidate = target_dir / path.name
+        if not candidate.exists():
+            return candidate
+        for index in range(1, 10000):
+            candidate = target_dir / f"{path.stem} ({index}){path.suffix}"
+            if not candidate.exists():
+                return candidate
+        raise OSError(f"移动目录中同名文件过多: {path.name}")
 
     def _cloud_index(self) -> dict[str, dict[str, Any]]:
         loader = getattr(self.client, "cloud_song_index", None)
@@ -927,11 +1048,15 @@ class Syncer:
                 and known_record.status
                 in {"uploaded", "skipped_local", "skipped_remote", "up_to_date"}
             ):
-                known_md5.setdefault(str(known_record.md5), known_path)
+                known_md5.setdefault(str(known_record.md5).lower(), known_path)
         for record in list(self.state.missing_candidates(known, include_missing=True)):
             if Path(record.path).exists():
                 continue
-            moved_to = known_md5.get(str(record.md5 or ""))
+            record_md5 = str(record.md5 or "").lower()
+            if not record_md5:
+                logger.warning("记录没有 MD5，无法判断云盘是否仍有该文件: %s", record.path)
+                continue
+            moved_to = known_md5.get(record_md5)
             if moved_to and moved_to != record.path:
                 self._record(
                     "moved",
@@ -943,15 +1068,23 @@ class Syncer:
                 self.state.mark_moved(record.path, moved_to)
                 stats.moved += 1
                 continue
+            if record_md5 not in self._cloud_md5:
+                # 本地和云盘都没有了，说明用户主动清理了这首歌，归档而不是报缺失。
+                if record.status != "deleted":
+                    logger.info("本地和云盘都已不存在，归档记录: %s", record.path)
+                    self.state.mark_deleted(
+                        record.path, "本地和云盘都已不存在，归档记录"
+                    )
+                continue
             if record.status == "missing":
-                # 已经确认缺失的记录不重复计数；保留记录，等文件重新出现。
+                # 云端仍在，只是本地没有；已经确认过的不重复计数。
                 continue
             stats.missing += 1
             self._record(
                 "missing",
                 path=record.path,
                 name=Path(record.path).name,
-                detail="本地文件已不存在",
+                detail="云盘仍有该歌曲，但本地文件已不存在",
             )
-            logger.warning("文件已不存在，标记 missing: %s", record.path)
+            logger.warning("云盘仍有该歌曲，但本地文件已不存在: %s", record.path)
             self.state.mark_missing(record.path)

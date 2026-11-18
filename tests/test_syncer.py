@@ -524,3 +524,74 @@ def test_excluded_history_is_hidden_not_missing(tmp_path: Path) -> None:
         assert state.get(old).status == "ignored"
         assert stats.missing == 0
         assert state.get(keep).status == "uploaded"
+
+def test_post_sync_delete_removes_local_after_cloud_confirmed(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "delete"
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.uploaded == 1
+        assert stats.deleted == 1
+        assert not target.exists()
+        record = state.get(target)
+        assert record is not None and record.status == "deleted"
+
+
+def test_post_sync_move_archives_local_file(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = tmp_path / "archive"
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "move"
+    config.move_target = archive
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.uploaded == 1
+        assert stats.moved_after_sync == 1
+        assert not target.exists()
+        assert archive.is_dir()
+        assert (archive / "a.mp3").exists()
+        record = state.get(target)
+        assert record is not None and record.status == "archived"
+        assert str(archive / "a.mp3") in (record.last_error or "")
+
+
+def test_missing_is_archived_when_local_and_cloud_are_gone(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        target.unlink()
+        client.cloud.clear()
+        stats = Syncer(config, client, state).run_once()
+        assert stats.missing == 0
+        record = state.get(target)
+        assert record is not None and record.status == "deleted"
+        assert "本地和云盘都已不存在" in (record.last_error or "")
+
+
+def test_missing_check_can_be_disabled(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.check_missing = False
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        assert Syncer(config, client, state).run_once().uploaded == 1
+        target.unlink()
+        stats = Syncer(config, client, state).run_once()
+        assert stats.missing == 0
+        record = state.get(target)
+        assert record is not None and record.status == "uploaded"

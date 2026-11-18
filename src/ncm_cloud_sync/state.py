@@ -431,6 +431,23 @@ class StateStore:
         )
         self.conn.commit()
 
+    def mark_deleted(self, path: str | Path, reason: str = "已同步并删除本地文件") -> None:
+        self.conn.execute(
+            "UPDATE files SET status = 'deleted', last_error = ?, updated_at = ? WHERE path = ?",
+            (reason[:2000], utc_now(), str(path)),
+        )
+        self.conn.commit()
+
+    def mark_archived(
+        self, path: str | Path, moved_to: str | Path, reason: str = ""
+    ) -> None:
+        detail = reason or f"已同步并移动到 {moved_to}"
+        self.conn.execute(
+            "UPDATE files SET status = 'archived', last_error = ?, updated_at = ? WHERE path = ?",
+            (detail[:2000], utc_now(), str(path)),
+        )
+        self.conn.commit()
+
     def mark_moved(self, path: str | Path, moved_to: str | Path) -> None:
         self.conn.execute(
             "UPDATE files SET status = 'moved', last_error = ?, updated_at = ? WHERE path = ?",

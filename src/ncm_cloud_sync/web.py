@@ -59,6 +59,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "log_level": "INFO",
     "exclude_dirs": [],
     "auto_sync": True,
+    "post_sync_action": "none",
+    "move_target": "",
+    "check_missing": True,
     "notify_on": "always",
     "notify_empty": False,
     "notifications": [],
@@ -262,6 +265,23 @@ class SettingsStore:
                 if str(item).strip() and Path(str(item)).expanduser().is_absolute()
             ]
         data["auto_sync"] = _as_bool(raw.get("auto_sync"), True)
+        action = str(raw.get("post_sync_action") or "none").lower()
+        if action not in {"none", "delete", "move"}:
+            action = "none"
+        target = str(raw.get("move_target") or "").strip()
+        target_path: Path | None = None
+        if target:
+            candidate = Path(target).expanduser()
+            if candidate.is_absolute():
+                target_path = candidate
+        if action == "move" and target_path is None:
+            action = "none"
+        data["post_sync_action"] = action
+        data["move_target"] = str(target_path) if action == "move" and target_path else ""
+        if "check_missing" in raw:
+            data["check_missing"] = _as_bool(raw.get("check_missing"), True)
+        else:
+            data["check_missing"] = action == "none"
         notify_on = str(raw.get("notify_on") or "always").lower()
         data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
         data["notify_empty"] = _as_bool(raw.get("notify_empty"), False)
@@ -283,6 +303,30 @@ class SettingsStore:
             payload.get("exclude_dirs") or [], data["music_dirs"]
         )
         data["auto_sync"] = _as_bool(payload.get("auto_sync"), True)
+        action = str(payload.get("post_sync_action") or "none").lower()
+        if action not in {"none", "delete", "move"}:
+            raise ValueError("同步后处理必须是 none/delete/move")
+        data["post_sync_action"] = action
+        target_text = str(payload.get("move_target") or "").strip()
+        target = ""
+        if action == "move":
+            if not target_text:
+                raise ValueError("选择移动时必须填写移动目录")
+            move_path = Path(target_text).expanduser()
+            if not move_path.is_absolute():
+                raise ValueError("移动目录必须是绝对路径")
+            move_path = move_path.resolve()
+            roots = [Path(item).expanduser().resolve() for item in data["music_dirs"]]
+            if any(_is_within(move_path, root) for root in roots):
+                raise ValueError("同步后移动目录不能位于音乐目录内")
+            if move_path.exists() and not move_path.is_dir():
+                raise ValueError("同步后移动目录必须是目录")
+            target = str(move_path)
+        data["move_target"] = target
+        if "check_missing" in payload:
+            data["check_missing"] = _as_bool(payload.get("check_missing"), True)
+        else:
+            data["check_missing"] = action == "none"
         notify_on = str(payload.get("notify_on") or "always").lower()
         if notify_on not in {"always", "failure", "success", "never"}:
             raise ValueError("通知时机必须是 always/failure/success/never")
@@ -316,6 +360,14 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
             for item in (settings.get("exclude_dirs") or [])
         )
     config.auto_sync = bool(settings.get("auto_sync", config.auto_sync))
+    action = str(settings.get("post_sync_action") or config.post_sync_action).lower()
+    if action in {"none", "delete", "move"}:
+        config.post_sync_action = action
+    if "move_target" in settings:
+        raw_target = str(settings.get("move_target") or "").strip()
+        config.move_target = Path(raw_target).expanduser() if raw_target else None
+    if "check_missing" in settings:
+        config.check_missing = bool(settings.get("check_missing"))
     notify_on = str(settings.get("notify_on") or config.notify_on).lower()
     if notify_on in {"always", "failure", "success", "never"}:
         config.notify_on = notify_on
@@ -340,6 +392,9 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["rate_limit"] = config.rate_limit
     settings["exclude_dirs"] = [str(path) for path in config.exclude_dirs]
     settings["auto_sync"] = config.auto_sync
+    settings["post_sync_action"] = config.post_sync_action
+    settings["move_target"] = str(config.move_target) if config.move_target else ""
+    settings["check_missing"] = config.check_missing
     settings["notify_on"] = config.notify_on
     settings["notify_empty"] = config.notify_empty
     settings["notifications"] = list(config.notify_channels)
@@ -917,6 +972,16 @@ class WebApp:
                                     "total": detail["total"],
                                     "items": items,
                                 }
+                    if kind == "missing" and not self.settings.load().get(
+                        "check_missing", True
+                    ):
+                        counts["missing"] = 0
+                        result = {
+                            "kind": "missing",
+                            "items": [],
+                            "total": 0,
+                            "disabled": True,
+                        }
                 return self._json(
                     start_response,
                     "200 OK",
@@ -1047,6 +1112,8 @@ class WebApp:
                 runs = state.recent_runs(RUN_HISTORY_LIMIT)
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
+        if not settings.get("check_missing", True):
+            stats["missing"] = 0
         if runs and runs[0].get("mode") == "scan":
             latest = runs[0]
             scan_stats = latest.get("stats") or {}
@@ -1145,6 +1212,9 @@ class WebApp:
             "rate_limit": self.config.rate_limit,
             "exclude_dirs": [str(path) for path in self.config.exclude_dirs],
             "auto_sync": self.config.auto_sync,
+            "post_sync_action": self.config.post_sync_action,
+            "move_target": str(self.config.move_target) if self.config.move_target else "",
+            "check_missing": self.config.check_missing,
             "notify_on": self.config.notify_on,
             "notify_empty": self.config.notify_empty,
             "notifications": list(self.config.notify_channels),

@@ -230,6 +230,24 @@
               <input id="autoSync" type="checkbox" checked>
               <span>启用自动同步（关闭后只手动同步，定时任务不再自动启动）</span>
             </label>
+            <label class="field">
+              <span>同步后处理</span>
+              <select id="postSyncAction">
+                <option value="none">不处理</option>
+                <option value="delete">删除本地文件</option>
+                <option value="move">移动本地文件</option>
+              </select>
+              <small class="muted">只在确认云盘已有同一内容后执行；默认不处理。</small>
+            </label>
+            <label class="field wide hidden" id="moveTargetField">
+              <span>移动目录</span>
+              <input id="moveTarget" type="text" spellcheck="false" placeholder="/vol1/1000/Music-Archive">
+              <small class="muted">必须是绝对路径，且不能位于音乐目录内。</small>
+            </label>
+            <label class="check-field wide">
+              <input id="checkMissing" type="checkbox" checked>
+              <span>校验本地文件缺失（关闭后不再统计本地缺失；是否缺失以云盘是否仍有该歌曲为准）</span>
+            </label>
             <div class="form-actions">
               <button id="saveSettings" class="btn primary" type="submit">保存设置</button>
               <span id="settingsStatus" class="status-line"></span>

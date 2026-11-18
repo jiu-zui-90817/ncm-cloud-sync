@@ -978,6 +978,26 @@ textarea:focus {
   color: #a9001b;
 }
 
+.permission-guidance {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.permission-guidance-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.permission-guidance-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .permission-commands {
   margin: 0;
   padding: 12px;
