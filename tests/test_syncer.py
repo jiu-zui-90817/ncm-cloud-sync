@@ -562,6 +562,27 @@ def test_post_sync_move_archives_local_file(tmp_path: Path) -> None:
         assert str(archive / "a.mp3") in (record.last_error or "")
 
 
+def test_archive_inside_music_dir_is_not_scanned_again(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = music / "archive"
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "move"
+    config.move_target = archive
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        first = Syncer(config, client, state).run_once()
+        assert first.moved_after_sync == 1
+        assert (archive / "a.mp3").exists()
+
+        second = Syncer(config, client, state).run_once()
+        assert second.scanned == 0
+        assert len(client.calls) == 1
+        assert [item.name for item in archive.iterdir()] == ["a.mp3"]
+
+
 def test_missing_is_archived_when_local_and_cloud_are_gone(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

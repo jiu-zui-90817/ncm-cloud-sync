@@ -97,7 +97,7 @@ def test_post_sync_defaults_and_delete_disables_missing(tmp_path: Path) -> None:
     assert explicit.check_missing is True
 
 
-def test_move_target_must_be_outside_music_dirs(tmp_path: Path) -> None:
+def test_move_target_inside_music_dir_is_scan_excluded(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()
     inside = music / "archive"
@@ -106,7 +106,20 @@ def test_move_target_must_be_outside_music_dirs(tmp_path: Path) -> None:
         music,
         f"post_sync_action: move\nmove_target: {inside}\n",
     )
-    with pytest.raises(ConfigError, match="不能位于音乐目录内"):
+    loaded = Config.load(config, env={})
+    assert loaded.move_target == inside
+    assert inside in loaded.scan_exclude_dirs
+
+
+def test_move_target_cannot_be_music_root(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    config = write_config(
+        tmp_path,
+        music,
+        f"post_sync_action: move\nmove_target: {music}\n",
+    )
+    with pytest.raises(ConfigError, match="不能是音乐根目录"):
         Config.load(config, env={})
 
 

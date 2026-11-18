@@ -114,6 +114,25 @@ class Config:
     def last_run_path(self) -> Path:
         return self.data_dir / "last_run.json"
 
+    @property
+    def scan_exclude_dirs(self) -> tuple[Path, ...]:
+        """扫描时真正跳过的目录：用户排除目录 + 音乐目录内的归档目录。"""
+        result = list(self.exclude_dirs)
+        target = self.move_target
+        if self.post_sync_action != "move" or target is None:
+            return tuple(result)
+        if any(target == root for root in self.music_dirs):
+            return tuple(result)
+        for root in self.music_dirs:
+            try:
+                target.relative_to(root)
+            except ValueError:
+                continue
+            if target not in result:
+                result.append(target)
+            break
+        return tuple(result)
+
     def ensure_data_dir(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -372,11 +391,10 @@ class Config:
             if not self.move_target.is_absolute():
                 raise ConfigError(f"移动目录必须是绝对路径: {self.move_target}")
             for root in self.music_dirs:
-                try:
-                    self.move_target.relative_to(root)
-                except ValueError:
-                    continue
-                raise ConfigError(f"移动目录不能位于音乐目录内: {self.move_target}")
+                if self.move_target == root:
+                    raise ConfigError(
+                        f"移动目录不能是音乐根目录: {self.move_target}"
+                    )
         for directory in self.exclude_dirs:
             if not directory.is_absolute():
                 raise ConfigError(f"排除目录必须是绝对路径: {directory}")

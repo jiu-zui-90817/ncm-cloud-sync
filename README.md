@@ -336,7 +336,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 | `exclude_dirs` | `[]` | 整棵跳过的绝对目录，必须位于某个音乐目录内；Web UI 里叫“排除目录” |
 | `auto_sync` | `true` | 是否启用后台自动同步；`false` 时只手动同步 |
 | `post_sync_action` | `none` | 同步成功后处理本地文件：`none` / `delete` / `move`；启用 delete/move 时未显式配置 `check_missing` 则默认 `false` |
-| `move_target` | `null` | `move` 的绝对目标目录，不能位于音乐目录内；不存在会自动创建 |
+| `move_target` | `null` | `move` 的绝对目标目录，可以位于音乐目录内的子目录，该目录会自动跳过扫描；不能是音乐根目录；不存在会自动创建 |
 | `check_missing` | `true` | 是否检查本地缺失；关闭后概览和明细不显示本地缺失 |
 | `notify_on` | `always` | 通知时机：`always` / `failure` / `success` / `never` |
 | `notify_empty` | `false` | 空跑（没有上传或补建文件）时也通知；失败、暂停、终止不受影响 |

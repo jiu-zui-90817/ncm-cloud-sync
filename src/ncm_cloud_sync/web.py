@@ -317,8 +317,8 @@ class SettingsStore:
                 raise ValueError("移动目录必须是绝对路径")
             move_path = move_path.resolve()
             roots = [Path(item).expanduser().resolve() for item in data["music_dirs"]]
-            if any(_is_within(move_path, root) for root in roots):
-                raise ValueError("同步后移动目录不能位于音乐目录内")
+            if any(move_path == root for root in roots):
+                raise ValueError("同步后移动目录不能是音乐根目录")
             if move_path.exists() and not move_path.is_dir():
                 raise ValueError("同步后移动目录必须是目录")
             target = str(move_path)
@@ -596,7 +596,7 @@ class SyncManager:
             "同步设置已更新，间隔 %s 秒，请求间隔 %s 秒，排除目录 %s 个",
             self.config.interval,
             self.config.rate_limit,
-            len(self.config.exclude_dirs),
+            len(self.config.scan_exclude_dirs),
         )
 
     def trigger(
@@ -894,7 +894,7 @@ class WebApp:
                     self.config.music_dirs,
                     self.config.extensions,
                     exclude=self.config.exclude,
-                    exclude_dirs=self.config.exclude_dirs,
+                    exclude_dirs=self.config.scan_exclude_dirs,
                 )
                 return self._json(start_response, "200 OK", report)
             if path == "/api/qr/status" and method == "GET":

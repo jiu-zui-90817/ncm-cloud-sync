@@ -74,7 +74,7 @@ auto_sync: true
 # 默认 none。启用 delete 或 move 时，若未显式写 check_missing，会默认关闭本地缺失校验。
 post_sync_action: none
 
-# post_sync_action=move 时必填：绝对目录，且不能位于 music_dirs 内；不存在会自动创建。
+# post_sync_action=move 时必填：绝对目录，可以位于 music_dirs 内的子目录（会自动跳过扫描）；不能是音乐根目录；不存在会自动创建。
 move_target: null
 
 # 是否检查本地文件缺失。false 时概览和明细不显示本地缺失。

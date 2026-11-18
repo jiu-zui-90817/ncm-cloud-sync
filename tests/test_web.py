@@ -249,11 +249,18 @@ def test_settings_move_requires_valid_target(tmp_path: Path) -> None:
     assert "绝对路径" in data["error"]
 
     inside = music / "archive"
-    status, _, data = call(
+    status, _, _ = call(
         app, "/api/settings", method="PUT", body={**base, "move_target": str(inside)}
     )
+    assert status == "200 OK"
+    assert app.config.move_target == inside
+    assert inside in app.config.scan_exclude_dirs
+
+    status, _, data = call(
+        app, "/api/settings", method="PUT", body={**base, "move_target": str(music)}
+    )
     assert status == "400 Bad Request"
-    assert "不能位于音乐目录内" in data["error"]
+    assert "不能是音乐根目录" in data["error"]
 
     archive = tmp_path / "archive"
     archive.mkdir()

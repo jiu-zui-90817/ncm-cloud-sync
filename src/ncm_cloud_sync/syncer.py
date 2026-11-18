@@ -274,7 +274,7 @@ class Syncer:
             if not path_is_excluded(
                 stored,
                 self.config.exclude,
-                self.config.exclude_dirs,
+                self.config.scan_exclude_dirs,
                 self.config.music_dirs,
             ):
                 continue
@@ -376,17 +376,18 @@ class Syncer:
             return self._run_scan_only(started, stats)
         run_id = self.state.start_run(mode=self.mode)
         logger.info("开始扫描: %s", ", ".join(str(item) for item in self.config.music_dirs))
-        if self.config.exclude_dirs:
+        exclude_dirs = self.config.scan_exclude_dirs
+        if exclude_dirs:
             logger.info(
                 "排除目录 %d 个: %s",
-                len(self.config.exclude_dirs),
-                ", ".join(str(item) for item in self.config.exclude_dirs),
+                len(exclude_dirs),
+                ", ".join(str(item) for item in exclude_dirs),
             )
         files, report = scan_with_report(
             self.config.music_dirs,
             self.config.extensions,
             self.config.exclude,
-            self.config.exclude_dirs,
+            exclude_dirs,
         )
         stats.scanned = len(files)
         stats.scan_unsupported = report.unsupported
@@ -819,8 +820,8 @@ class Syncer:
         target_dir = Path(self.config.move_target)
         if not target_dir.is_absolute():
             raise OSError("同步后移动目录必须是绝对路径")
-        if self._under_music_dirs(target_dir):
-            raise OSError("同步后移动目录不能位于音乐目录内")
+        if any(target_dir == root for root in self.config.music_dirs):
+            raise OSError("同步后移动目录不能是音乐根目录")
         candidate = target_dir / path.name
         if not candidate.exists():
             return candidate
@@ -861,7 +862,7 @@ class Syncer:
                 self.config.music_dirs,
                 self.config.extensions,
                 self.config.exclude,
-                self.config.exclude_dirs,
+                self.config.scan_exclude_dirs,
             )
             stats.scanned = len(files)
             stats.scan_unsupported = report.unsupported
