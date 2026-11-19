@@ -97,6 +97,12 @@ h2 {
   gap: 8px;
 }
 
+.topbar-right .btn.tiny {
+  min-height: 28px;
+  padding: 3px 10px;
+  background: var(--surface);
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

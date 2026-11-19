@@ -419,9 +419,10 @@
       hint = data.message + " · " + hint;
     }
     el("signinHint").textContent = hint;
-    var button = el("signinNow");
+    var button = el("headerSignin");
     button.textContent = state.signinBusy ? "签到中…" : (signed ? "今日已签到" : "立即签到");
     button.disabled = !data.enabled || signed || state.signinBusy;
+    button.title = data.enabled ? "" : "请先在设置中启用每日签到";
   }
 
   function renderSettings(status) {
@@ -439,6 +440,7 @@
     el("postSyncAction").value = action;
     el("moveTarget").value = settings.move_target || "";
     el("checkMissing").checked = settings.check_missing !== false;
+    el("dailySignin").checked = settings.daily_signin === true;
     el("moveTargetField").classList.toggle("hidden", action !== "move");
     el("logLevel").value = settings.log_level || "INFO";
     el("notifyOn").value = settings.notify_on || "always";
@@ -568,6 +570,7 @@
     el("accountBadge").className = "pill" + (data.logged_in ? " ok" : " muted");
     el("loginCard").classList.toggle("hidden", Boolean(data.logged_in));
     el("dashboard").classList.toggle("hidden", !data.logged_in);
+    el("headerSignin").classList.toggle("hidden", !data.logged_in);
     if (!data.logged_in) {
       state.capacityLoaded = false;
       return;
@@ -1625,7 +1628,7 @@
       return;
     }
     state.signinBusy = true;
-    var button = el("signinNow");
+    var button = el("headerSignin");
     button.disabled = true;
     button.textContent = "签到中…";
     function finish(signin, error) {
@@ -1745,7 +1748,7 @@
     el("refreshLogs").addEventListener("click", loadLogs);
     el("settingsForm").addEventListener("submit", saveSettings);
     el("postSyncAction").addEventListener("change", updatePostSyncFields);
-    el("signinNow").addEventListener("click", signinNow);
+    el("headerSignin").addEventListener("click", signinNow);
     el("settingsForm").addEventListener("input", function () {
       state.settingsDirty = true;
       el("settingsStatus").textContent = "有未保存的修改";

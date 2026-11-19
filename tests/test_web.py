@@ -946,6 +946,20 @@ def test_web_module_entrypoint(tmp_path: Path, monkeypatch: Any) -> None:
             raise AssertionError("ncm_cloud_sync.web 没有执行 __main__ 入口")
 
 
+def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    status, _, html = call(app, "/")
+    assert status == "200 OK"
+    assert 'id="headerSignin"' in html
+    assert 'id="signinNow"' not in html
+
+    status, _, script = call(app, "/app.js")
+    assert status == "200 OK"
+    assert 'el("dailySignin").checked = settings.daily_signin === true;' in script
+    assert 'el("headerSignin").addEventListener("click", signinNow);' in script
+    assert 'el("signinNow")' not in script
+
+
 def test_static_page_has_cookie_login(tmp_path: Path) -> None:
     app = make_app(tmp_path)
     status, _, html = call(app, "/")

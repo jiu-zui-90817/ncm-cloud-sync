@@ -273,6 +273,7 @@ check(eapi, md5,size)                         -> needUpload/songId
 - 0.2.22 起，通知配置兼容 tuple/list（修复同步结束通知被静默跳过）；Web 图标与应用图标一致；覆盖安装或在应用中心修改设置时合并保留 `exclude_dirs`、`auto_sync`、`notify_on`、`notifications`。
 - 0.3.0 起项目更名为 NCM Cloud Sync，应用标识/包名/CLI 改为 `ncm-cloud-sync`，Python 包改为 `ncm_cloud_sync`，环境变量前缀改为 `NCM_CLOUD_SYNC_`；钉钉新增自定义关键词支持，IP 地址段白名单需在钉钉侧配置 NAS 出口公网 IP。
 - 0.3.1 起每轮同步前先读云盘列表，用 `privateCloud.md5` 做 MD5 对账，已在云盘的直接 `skipped_remote`；`needUpload=false` 的补建单独记为 `linked`，不计入 `uploaded` 和字节数；进程 stdout/stderr 写到 `app.out`，`app.log` 只由日志 handler 写，避免重复。
+- 0.3.22 起设置页的 `dailySignin` 复选框会按 `GET /api/status.settings.daily_signin` 回填（此前只保存不回显）；手动签到按钮移到首页账号栏 `headerSignin`，未登录时隐藏，成功/已签到后显示“今日已签到”并禁用，`POST /api/signin` 后端逻辑不变。
 - 0.3.21 起 Web 签到按钮在成功/已签到后变为“今日已签到”并禁用；请求进行中显示“签到中…”并忽略重复点击。服务端仍以 state 中的当天签到状态去重，不会重复请求签到接口。
 - 0.3.20 起每日签到改为随机时刻：每天在本地时间 08:00–23:00 内随机抽取（分钟 1–59，避开整点），目标写入 state meta 的 `signin_target`，同一日期不会重抽；Web 调度线程和 `daemon` 每 60 秒检查一次，到点且未签到才请求，与同步间隔解耦，错过时刻后下一次检查补签。`signin_status` 返回 `target/window_start/window_end`，`POST /api/signin` 手动签到忽略随机时刻。
 - 0.3.19 起新增 `daily_signin`（默认 `false`，环境变量 `NCM_CLOUD_SYNC_DAILY_SIGNIN`，Web 设置同名字段）；开启后每轮 `run_once` 在 `_load_cloud` 后、`_preflight` 前尝试调用（0.3.20 起还要等到当天随机时刻） `GET https://music.163.com/api/point/dailyTask?type=1` 签到，每天最多自动尝试一次，失败只记日志、不影响同步。返回 `-2` 视为已签到，`301/302` 视为登录失效，`405/429` 按限流处理。签到结果写入 state meta 的 `signin_date/signin_status/signin_message/signin_points/signin_at`，`GET /api/status` 返回 `signin`，`POST /api/signin` 可手动签到；签到只领取云贝，不增加云盘空间。
