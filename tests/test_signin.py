@@ -60,6 +60,8 @@ def test_daily_signin_succeeds_and_skips_second_attempt(tmp_path: Path) -> None:
         second = attempt_daily_signin(config, client, state, now=now)
         assert second["status"] == "success"
         assert second["skipped"] is True
+        third = attempt_daily_signin(config, client, state, now=now, manual=True)
+        assert third["skipped"] is True
         assert client.calls == 1
 
 

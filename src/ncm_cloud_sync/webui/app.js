@@ -20,6 +20,7 @@
     updateInfo: null,
     capacityLoaded: false,
     capacityLoading: false,
+    signinBusy: false,
     runDetail: { runId: null, kind: "all", items: [], total: 0, offset: 0, limit: 200, loading: false, run: null, counts: {} },
     fileDetail: { kind: null, items: [], total: 0, loading: false, source: null, finishedAt: null, counts: {} }
   };
@@ -396,11 +397,12 @@
 
   function renderSignin(signin) {
     var data = signin || {};
+    var signed = Boolean(data.today && (data.status === "success" || data.status === "already"));
     var text = "今日未签到";
     if (!data.enabled) {
       text = "未启用";
-    } else if (data.today && (data.status === "success" || data.status === "already")) {
-      text = data.status === "already" ? "今日已签到" : "今日已签到";
+    } else if (signed) {
+      text = "今日已签到";
       if (data.points) {
         text += " · 云贝 +" + data.points;
       }
@@ -417,7 +419,9 @@
       hint = data.message + " · " + hint;
     }
     el("signinHint").textContent = hint;
-    el("signinNow").disabled = !data.enabled;
+    var button = el("signinNow");
+    button.textContent = state.signinBusy ? "签到中…" : (signed ? "今日已签到" : "立即签到");
+    button.disabled = !data.enabled || signed || state.signinBusy;
   }
 
   function renderSettings(status) {
@@ -1617,13 +1621,32 @@
   }
 
   function signinNow() {
+    if (state.signinBusy) {
+      return;
+    }
+    state.signinBusy = true;
+    var button = el("signinNow");
+    button.disabled = true;
+    button.textContent = "签到中…";
+    function finish(signin, error) {
+      state.signinBusy = false;
+      if (signin) {
+        if (state.status) {
+          state.status.signin = signin;
+        }
+        renderSignin(signin);
+      }
+      if (error) {
+        showToast(error.message, true);
+      }
+      loadStatus(false);
+    }
     api("/api/signin", { method: "POST" }).then(function (result) {
       var signin = result.signin || {};
       showToast(signin.message || "签到完成");
-      loadStatus(false);
+      finish(signin, null);
     }).catch(function (error) {
-      showToast(error.message, true);
-      loadStatus(false);
+      finish(null, error);
     });
   }
 
