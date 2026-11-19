@@ -106,6 +106,19 @@
     return date.toLocaleString("zh-CN", { hour12: false });
   }
 
+  function formatClock(value) {
+    var text = String(value || "");
+    var match = text.match(/[T ](\d{2}:\d{2})/);
+    if (match) {
+      return match[1];
+    }
+    var date = new Date(value);
+    if (isNaN(date.getTime())) {
+      return value || "-";
+    }
+    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   function formatRunTime(value) {
     var date = new Date(value);
     if (isNaN(date.getTime())) {
@@ -393,9 +406,13 @@
       }
     } else if (data.today && data.status === "failed") {
       text = "今日签到失败";
+    } else if (data.target) {
+      text = "今日随机签到 · " + formatClock(data.target);
     }
     el("signinStatusText").textContent = text;
-    var hint = "签到只获得云贝，不是云盘空间；自动签到可能触发平台风控，请自行评估。";
+    var windowText = (data.window_start || "08:00") + "–" + (data.window_end || "23:00");
+    var hint = "签到只获得云贝，不是云盘空间；自动签到在 " + windowText +
+      " 之间随机进行，仍可能触发平台风控，请自行评估。";
     if (data.today && data.message) {
       hint = data.message + " · " + hint;
     }

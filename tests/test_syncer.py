@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from ncm_cloud_sync.client import UploadResult
 from ncm_cloud_sync.config import Config
 from ncm_cloud_sync.errors import NosUnavailableError, RateLimitError, UploadError
+from ncm_cloud_sync.signin import SIGNIN_TARGET
 from ncm_cloud_sync.state import StateStore
 from ncm_cloud_sync.syncer import Syncer
 
@@ -82,6 +84,7 @@ def test_daily_signin_runs_once_per_day(tmp_path: Path) -> None:
     config.daily_signin = True
     client = FakeClient()
     with StateStore(config.db_path) as state:
+        state.set_meta(SIGNIN_TARGET, datetime.now().astimezone().isoformat(timespec="seconds"))
         Syncer(config, client, state).run_once()
         assert client.signin_calls == 1
         assert state.get_meta("signin_status") == "success"

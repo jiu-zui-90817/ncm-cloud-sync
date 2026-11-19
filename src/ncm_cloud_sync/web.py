@@ -30,7 +30,7 @@ from .errors import ApiError, AuthError, ConfigError, UploadError, NcmSyncError
 from .login import apply_qr_cookies, build_qr_url
 from .permissions import audit_permissions
 from .session import load_session, save_session
-from .signin import attempt_daily_signin, signin_status
+from .signin import attempt_daily_signin, maybe_daily_signin, signin_status
 from .state import StateStore
 from .syncer import SyncStats, Syncer
 from .updates import REPO_URL, RELEASES_URL, UpdateChecker
@@ -595,6 +595,16 @@ class SyncManager:
         if self._scheduler and self._scheduler.is_alive():
             self._scheduler.join(timeout=3)
 
+    def _check_signin(self) -> None:
+        if not self.config.daily_signin or not self.sessions.has_session():
+            return
+        try:
+            with self.sessions.client() as client:
+                with StateStore(self.config.db_path) as state:
+                    maybe_daily_signin(self.config, client, state)
+        except Exception:
+            logger.warning("随机签到检查失败，已忽略", exc_info=True)
+
     def apply_settings(self, settings: dict[str, Any]) -> None:
         with self._lock:
             apply_settings(self.config, settings)
@@ -772,30 +782,32 @@ class SyncManager:
         next_at = time.time() + min(30, max(5, config.interval))
         self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
         while not self._stop.is_set():
+            self._check_signin()
             if not config.auto_sync:
                 with self._lock:
                     self._next_run_at = None
-                self._wake.wait(30)
+                self._wake.wait(60)
                 self._wake.clear()
                 continue
-            wait = max(1.0, next_at - time.time())
+            now = time.time()
+            if now >= next_at:
+                try:
+                    with self._lock:
+                        auto_paused = self._auto_paused
+                    if config.auto_sync and self.sessions.has_session() and not auto_paused:
+                        self.trigger(source="schedule")
+                except Exception:
+                    logger.warning("定时同步触发失败", exc_info=True)
+                next_at = time.time() + max(60, int(config.interval))
+                with self._lock:
+                    self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
+                continue
+            wait = min(60.0, max(1.0, next_at - now))
             if self._wake.wait(wait):
                 self._wake.clear()
                 next_at = time.time() + max(60, int(config.interval))
-                self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
-                continue
-            if self._stop.is_set():
-                break
-            try:
                 with self._lock:
-                    auto_paused = self._auto_paused
-                if config.auto_sync and self.sessions.has_session() and not auto_paused:
-                    self.trigger(source="schedule")
-            except Exception:
-                logger.warning("定时同步触发失败", exc_info=True)
-            next_at = time.time() + max(60, int(config.interval))
-            with self._lock:
-                self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
+                    self._next_run_at = datetime.fromtimestamp(next_at, timezone.utc).isoformat(timespec="seconds")
 
 
 def read_json(path: Path) -> dict[str, Any] | None:
