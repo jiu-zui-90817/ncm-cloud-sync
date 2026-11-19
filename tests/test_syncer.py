@@ -31,6 +31,11 @@ class FakeClient:
         self.cloud_error = cloud_error
         self.last_cloud_capacity = capacity or {}
         self.calls: list[str] = []
+        self.signin_calls = 0
+
+    def daily_signin(self):
+        self.signin_calls += 1
+        return {"already": False, "message": "签到成功", "points": 2}
 
     def preflight(self, index):
         if self.preflight_error is not None:
@@ -67,6 +72,21 @@ def make_config(tmp_path: Path, music: Path) -> Config:
         interval=1,
         rate_limit=0,
     )
+
+
+def test_daily_signin_runs_once_per_day(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    (music / "a.mp3").write_bytes(b"a" * 100)
+    config = make_config(tmp_path, music)
+    config.daily_signin = True
+    client = FakeClient()
+    with StateStore(config.db_path) as state:
+        Syncer(config, client, state).run_once()
+        assert client.signin_calls == 1
+        assert state.get_meta("signin_status") == "success"
+        Syncer(config, client, state).run_once()
+        assert client.signin_calls == 1
 
 
 def test_upload_then_up_to_date(tmp_path: Path) -> None:

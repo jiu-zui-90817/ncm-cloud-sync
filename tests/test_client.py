@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import hashlib
 import json
@@ -737,3 +738,38 @@ def test_post_json_throttles_requests(monkeypatch) -> None:
     client._weapi("/weapi/test", {})
     assert sleeps, "第二次请求应等待请求间隔"
     assert all(seconds > 0 for seconds in sleeps)
+
+
+def test_daily_signin_parses_success(monkeypatch: Any) -> None:
+    client = make_client()
+    calls: list[tuple[str, dict[str, Any] | None, bool]] = []
+
+    def fake_get(url: str, params=None, *, check=True):
+        calls.append((url, params, check))
+        return {"code": 200, "data": {"code": 200, "message": "签到成功", "point": 2}}
+
+    monkeypatch.setattr(client, "_get_json", fake_get)
+    result = client.daily_signin()
+    assert result["already"] is False
+    assert result["points"] == 2
+    assert result["message"] == "签到成功"
+    assert calls == [(f"{client_module.BASE_URL}/api/point/dailyTask", {"type": 1}, False)]
+
+
+def test_daily_signin_already_signed(monkeypatch: Any) -> None:
+    client = make_client()
+    monkeypatch.setattr(
+        client,
+        "_get_json",
+        lambda *args, **kwargs: {"code": -2, "message": "今天已经签到过了"},
+    )
+    result = client.daily_signin()
+    assert result["already"] is True
+    assert result["points"] is None
+
+
+def test_daily_signin_maps_auth_code(monkeypatch: Any) -> None:
+    client = make_client()
+    monkeypatch.setattr(client, "_get_json", lambda *args, **kwargs: {"code": 301})
+    with pytest.raises(AuthError, match="登录"):
+        client.daily_signin()

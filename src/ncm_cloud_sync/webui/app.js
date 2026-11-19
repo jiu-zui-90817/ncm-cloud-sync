@@ -381,7 +381,30 @@
     });
   }
 
+  function renderSignin(signin) {
+    var data = signin || {};
+    var text = "今日未签到";
+    if (!data.enabled) {
+      text = "未启用";
+    } else if (data.today && (data.status === "success" || data.status === "already")) {
+      text = data.status === "already" ? "今日已签到" : "今日已签到";
+      if (data.points) {
+        text += " · 云贝 +" + data.points;
+      }
+    } else if (data.today && data.status === "failed") {
+      text = "今日签到失败";
+    }
+    el("signinStatusText").textContent = text;
+    var hint = "签到只获得云贝，不是云盘空间；自动签到可能触发平台风控，请自行评估。";
+    if (data.today && data.message) {
+      hint = data.message + " · " + hint;
+    }
+    el("signinHint").textContent = hint;
+    el("signinNow").disabled = !data.enabled;
+  }
+
   function renderSettings(status) {
+    renderSignin(status.signin);
     if (state.settingsDirty) {
       return;
     }
@@ -1552,6 +1575,7 @@
       post_sync_action: el("postSyncAction").value,
       move_target: el("moveTarget").value.trim(),
       check_missing: el("checkMissing").checked,
+      daily_signin: el("dailySignin").checked,
       log_level: el("logLevel").value,
       notify_on: el("notifyOn").value,
       notify_empty: el("notifyEmpty").checked,
@@ -1573,6 +1597,17 @@
 
   function saveNotifications() {
     saveSettings();
+  }
+
+  function signinNow() {
+    api("/api/signin", { method: "POST" }).then(function (result) {
+      var signin = result.signin || {};
+      showToast(signin.message || "签到完成");
+      loadStatus(false);
+    }).catch(function (error) {
+      showToast(error.message, true);
+      loadStatus(false);
+    });
   }
 
   function logout() {
@@ -1670,6 +1705,7 @@
     el("refreshLogs").addEventListener("click", loadLogs);
     el("settingsForm").addEventListener("submit", saveSettings);
     el("postSyncAction").addEventListener("change", updatePostSyncFields);
+    el("signinNow").addEventListener("click", signinNow);
     el("settingsForm").addEventListener("input", function () {
       state.settingsDirty = true;
       el("settingsStatus").textContent = "有未保存的修改";

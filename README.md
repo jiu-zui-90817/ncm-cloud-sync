@@ -1,6 +1,6 @@
 # NCM Cloud Sync
 
-把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用。内置 Web UI，支持扫码登录、本地与云端双重去重、仅扫描对账、运行历史、同步后处理、权限体检和云盘容量校验。
+把本地音乐自动同步到**网易云音乐「音乐云盘」**的飞牛 NAS（fnOS）原生应用。内置 Web UI，支持扫码登录、本地与云端双重去重、仅扫描对账、运行历史、同步后处理、每日签到、权限体检和云盘容量校验。
 
 > 非官方项目。网易云没有公开上传 API，本项目依赖从桌面客户端整理出的 weapi / eapi / NOS 上传链路，接口随时可能变化。使用前请先看[风险与限制](#风险与限制)。
 
@@ -20,6 +20,7 @@
 - **统计明细**：已上传、待处理、本地缺失、跳过/重复都可以点开查看逐文件列表。
 - **权限体检**：检查应用账号能否读取音乐目录，列出无权限的文件和目录示例，并引导到飞牛文件管理里给应用账号授权。
 - **同步后处理**：只对本次上传或补建成功的文件，可选删除本地文件或移动到指定目录；默认不处理，不会处理已存在/未变更的文件。
+- **每日签到**：可选开启，默认关闭；开启后每轮同步前尝试签到并显示结果，也可以手动签到。签到只领取云贝，不增加云盘空间；自动签到需自行评估风控风险。
 - **云盘容量**：账号卡显示已用 / 总量 / 剩余和占用比例；上传前校验剩余空间。
 - **同步通知**：支持 Telegram、Bark、ntfy、Gotify、Discord、Slack、钉钉、Server酱、PushPlus、Pushover、PushDeer、Webhook 和 SMTP；默认只在有上传或补建时通知，空跑可单独开启。
 - **自动同步开关**：可以关闭后台自动同步，只保留手动执行。
@@ -338,6 +339,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 | `post_sync_action` | `none` | 处理本次上传/补建成功的本地文件：`none` / `delete` / `move`；不会处理已存在/未变更/云端已存在的文件；启用 delete/move 时未显式配置 `check_missing` 则默认 `false` |
 | `move_target` | `null` | `move` 的绝对目标目录，可以位于音乐目录内的子目录，该目录会自动跳过扫描；不能是音乐根目录；不存在会自动创建 |
 | `check_missing` | `true` | 是否检查本地缺失；关闭后概览和明细不显示本地缺失 |
+| `daily_signin` | `false` | 是否在同步前自动签到；每天最多自动尝试一次。签到只领取云贝，不增加云盘空间；使用非官方接口，可能有风控风险 |
 | `notify_on` | `always` | 通知时机：`always` / `failure` / `success` / `never` |
 | `notify_empty` | `false` | 空跑（没有上传或补建文件）时也通知；失败、暂停、终止不受影响 |
 | `notify_channels` | `[]` | 通知渠道列表，见下文 |
@@ -351,7 +353,7 @@ ncm-cloud-sync --music-dir "D:\Music" sync
 
 环境变量优先级高于 YAML，低于命令行参数。支持：
 
-`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_POST_SYNC_ACTION`、`NCM_CLOUD_SYNC_MOVE_TARGET`、`NCM_CLOUD_SYNC_CHECK_MISSING`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_EMPTY`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
+`NCM_CLOUD_SYNC_CONFIG`、`NCM_CLOUD_SYNC_DIRS`、`NCM_CLOUD_SYNC_DATA_DIR`、`NCM_CLOUD_SYNC_COOKIE`、`NCM_CLOUD_SYNC_COOKIE_FILE`、`NCM_CLOUD_SYNC_EXTENSIONS`、`NCM_CLOUD_SYNC_UPLOAD_EXTENSIONS`、`NCM_CLOUD_SYNC_EXCLUDE`、`NCM_CLOUD_SYNC_EXCLUDE_DIRS`、`NCM_CLOUD_SYNC_AUTO_SYNC`、`NCM_CLOUD_SYNC_POST_SYNC_ACTION`、`NCM_CLOUD_SYNC_MOVE_TARGET`、`NCM_CLOUD_SYNC_CHECK_MISSING`、`NCM_CLOUD_SYNC_DAILY_SIGNIN`、`NCM_CLOUD_SYNC_NOTIFY_ON`、`NCM_CLOUD_SYNC_NOTIFY_EMPTY`、`NCM_CLOUD_SYNC_NOTIFY_CHANNELS`、`NCM_CLOUD_SYNC_INTERVAL`、`NCM_CLOUD_SYNC_RATE_LIMIT`、`NCM_CLOUD_SYNC_TIMEOUT`、`NCM_CLOUD_SYNC_RETRIES`、`NCM_CLOUD_SYNC_MIN_SIZE`、`NCM_CLOUD_SYNC_MAX_UPLOAD_SIZE`、`NCM_CLOUD_SYNC_LOG_LEVEL`。
 
 `NCM_CLOUD_SYNC_DIRS` 可以用系统路径分隔符、逗号或空格分隔多个目录。`NCM_CLOUD_SYNC_NOTIFY_CHANNELS` 是 JSON 数组，格式与 `notify_channels` 相同。
 
@@ -439,7 +441,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、上传前预检、同步后删除/移动、缺失语义、扫码登录、Web API、通知、更新检查、容量校验和权限体检。
+测试覆盖加密参数、Cookie、配置、扫描、标签、状态库、上传协议顺序、去重、失败隔离、上传前预检、同步后删除/移动、缺失语义、每日签到、扫码登录、Web API、通知、更新检查、容量校验和权限体检。
 
 构建飞牛原生应用：
 

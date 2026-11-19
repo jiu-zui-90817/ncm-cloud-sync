@@ -107,6 +107,9 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["settings"]["post_sync_action"] == "none"
     assert data["settings"]["move_target"] == ""
     assert data["settings"]["check_missing"] is True
+    assert data["settings"]["daily_signin"] is False
+    assert data["signin"]["enabled"] is False
+    assert data["signin"]["status"] == ""
     assert data["sync"]["state"] == "idle"
     assert data["sync"]["can_pause"] is False
     assert data["runs"] == []
@@ -189,6 +192,47 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
     assert saved["log_level"] == "DEBUG"
+
+
+def test_signin_requires_enabled_and_records_manual_result(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    app = make_app(tmp_path)
+
+    status, _, data = call(app, "/api/signin", method="POST")
+    assert status == "400 Bad Request"
+    assert "启用每日签到" in data["error"]
+
+    status, _, _ = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(app.config.music_dirs[0])],
+            "daily_signin": True,
+        },
+    )
+    assert status == "200 OK"
+    assert app.config.daily_signin is True
+
+    class FakeSigninClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def daily_signin(self):
+            return {"already": False, "message": "签到成功", "points": 2}
+
+    monkeypatch.setattr(app.sessions, "client", lambda: FakeSigninClient())
+    status, _, data = call(app, "/api/signin", method="POST")
+    assert status == "200 OK"
+    assert data["signin"]["status"] == "success"
+    assert data["signin"]["points"] == 2
+
+    with StateStore(app.config.db_path) as state:
+        assert state.get_meta("signin_status") == "success"
 
 
 def test_settings_post_sync_delete_disables_missing_by_default(tmp_path: Path) -> None:

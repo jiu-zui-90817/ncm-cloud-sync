@@ -92,6 +92,7 @@ class Config:
     post_sync_action: str = "none"
     move_target: Path | None = None
     check_missing: bool = True
+    daily_signin: bool = False
     notify_on: str = "always"
     notify_empty: bool = False
     notify_channels: tuple[dict[str, Any], ...] = ()
@@ -160,6 +161,7 @@ class Config:
             "post_sync_action": self.post_sync_action,
             "move_target": str(self.move_target) if self.move_target else None,
             "check_missing": self.check_missing,
+            "daily_signin": self.daily_signin,
             "notify_on": self.notify_on,
             "notify_empty": self.notify_empty,
             "notify_channels": mask_channels(self.notify_channels),
@@ -223,6 +225,8 @@ class Config:
             values["move_target"] = _resolve_path(raw["move_target"], base)
         if "check_missing" in raw:
             values["check_missing"] = parse_bool(raw["check_missing"], True)
+        if "daily_signin" in raw:
+            values["daily_signin"] = parse_bool(raw["daily_signin"], False)
         if "notify_on" in raw:
             values["notify_on"] = str(raw["notify_on"]).strip().lower()
         if "notify_empty" in raw:
@@ -348,6 +352,9 @@ class Config:
         check_missing = text("NCM_CLOUD_SYNC_CHECK_MISSING")
         if check_missing is not None:
             values["check_missing"] = parse_bool(check_missing, True)
+        daily_signin = text("NCM_CLOUD_SYNC_DAILY_SIGNIN")
+        if daily_signin is not None:
+            values["daily_signin"] = parse_bool(daily_signin, False)
         notify_on = text("NCM_CLOUD_SYNC_NOTIFY_ON")
         if notify_on:
             values["notify_on"] = notify_on.lower()

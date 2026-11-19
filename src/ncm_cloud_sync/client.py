@@ -282,6 +282,48 @@ class CloudClient:
                 time.sleep(delay)
         raise UploadError(f"请求失败: {url}: {last_error}") from last_error
 
+    def _get_json(
+        self,
+        url: str,
+        params: dict[str, Any] | None = None,
+        *,
+        check: bool = True,
+    ) -> dict[str, Any]:
+        """GET JSON，带与 POST 相同的重试和限速。"""
+        merged = self._headers()
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                self._throttle()
+                response = self._http.get(url, params=params, headers=merged)
+                self._absorb_cookies(response)
+                if response.status_code in {405, 429}:
+                    raise RateLimitError(
+                        "操作频繁，请稍后再试",
+                        code=response.status_code,
+                        url=url,
+                    )
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        f"服务端错误 {response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                response.raise_for_status()
+                try:
+                    body = response.json()
+                except ValueError as exc:
+                    raise UploadError(f"接口返回内容无法解析: {url}") from exc
+                return self._check_body(body, url) if check else body
+            except (httpx.TransportError, httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                last_error = exc
+                if attempt >= self.retries:
+                    break
+                delay = min(2 ** attempt, 8)
+                logger.warning("请求失败，%s 秒后重试: %s", delay, exc)
+                time.sleep(delay)
+        raise UploadError(f"请求失败: {url}: {last_error}") from last_error
+
     def _absorb_cookies(self, response: httpx.Response) -> None:
         # 不能遍历 response.cookies：网易云同一个名字会在不同 Path 下重复
         # 下发（例如 MUSIC_A_T），httpx 会抛 CookieConflict。直接解析原始
@@ -554,6 +596,48 @@ class CloudClient:
         if not profile and not body.get("account"):
             raise AuthError("未登录：MUSIC_U 缺失或已失效，请重新登录")
         return profile
+
+    def daily_signin(self, signin_type: int = 1) -> dict[str, Any]:
+        """每日签到。type=1 为 PC/Web，type=0 为安卓。"""
+        url = f"{BASE_URL}/api/point/dailyTask"
+        body = self._get_json(url, params={"type": int(signin_type)}, check=False)
+        if not isinstance(body, dict):
+            raise ApiError("签到接口返回了非 JSON 对象", url=url)
+        code = _as_int(body.get("code"), -1)
+        if code in AUTH_ERROR_CODES:
+            raise AuthError("登录状态无效，请重新登录后再签到")
+        if code in {405, 429}:
+            raise RateLimitError("签到请求过于频繁，请稍后再试", code=code, url=url)
+        data = body.get("data")
+        data = data if isinstance(data, dict) else {}
+        data_code = _as_int(data.get("code"), code) if "code" in data else code
+        if data_code in AUTH_ERROR_CODES:
+            raise AuthError("登录状态无效，请重新登录后再签到")
+        if data_code in {405, 429}:
+            raise RateLimitError("签到请求过于频繁，请稍后再试", code=data_code, url=url)
+        if code == -2 or data_code == -2:
+            return {
+                "signin_type": int(signin_type),
+                "already": True,
+                "code": code,
+                "message": str(data.get("message") or body.get("message") or "今天已经签到过了"),
+                "points": None,
+            }
+        if code not in {200, -1}:
+            message = body.get("msg") or body.get("message") or "签到失败"
+            raise ApiError(str(message), code=code, url=url)
+        if data_code not in {200, -1}:
+            message = data.get("message") or body.get("message") or "签到失败"
+            raise ApiError(str(message), code=data_code, url=url)
+        raw_points = data.get("point", data.get("points", body.get("point")))
+        points = _as_int(raw_points, 0) if raw_points is not None else 0
+        return {
+            "signin_type": int(signin_type),
+            "already": False,
+            "code": code,
+            "message": str(data.get("message") or body.get("message") or "签到成功"),
+            "points": points or None,
+        }
 
     def is_logged_in(self) -> bool:
         try:

@@ -30,6 +30,7 @@ from .errors import ApiError, AuthError, ConfigError, UploadError, NcmSyncError
 from .login import apply_qr_cookies, build_qr_url
 from .permissions import audit_permissions
 from .session import load_session, save_session
+from .signin import attempt_daily_signin, signin_status
 from .state import StateStore
 from .syncer import SyncStats, Syncer
 from .updates import REPO_URL, RELEASES_URL, UpdateChecker
@@ -62,6 +63,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "post_sync_action": "none",
     "move_target": "",
     "check_missing": True,
+    "daily_signin": False,
     "notify_on": "always",
     "notify_empty": False,
     "notifications": [],
@@ -282,6 +284,7 @@ class SettingsStore:
             data["check_missing"] = _as_bool(raw.get("check_missing"), True)
         else:
             data["check_missing"] = action == "none"
+        data["daily_signin"] = _as_bool(raw.get("daily_signin"), False)
         notify_on = str(raw.get("notify_on") or "always").lower()
         data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
         data["notify_empty"] = _as_bool(raw.get("notify_empty"), False)
@@ -327,6 +330,7 @@ class SettingsStore:
             data["check_missing"] = _as_bool(payload.get("check_missing"), True)
         else:
             data["check_missing"] = action == "none"
+        data["daily_signin"] = _as_bool(payload.get("daily_signin"), False)
         notify_on = str(payload.get("notify_on") or "always").lower()
         if notify_on not in {"always", "failure", "success", "never"}:
             raise ValueError("通知时机必须是 always/failure/success/never")
@@ -368,6 +372,8 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
         config.move_target = Path(raw_target).expanduser() if raw_target else None
     if "check_missing" in settings:
         config.check_missing = bool(settings.get("check_missing"))
+    if "daily_signin" in settings:
+        config.daily_signin = bool(settings.get("daily_signin"))
     notify_on = str(settings.get("notify_on") or config.notify_on).lower()
     if notify_on in {"always", "failure", "success", "never"}:
         config.notify_on = notify_on
@@ -395,6 +401,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["post_sync_action"] = config.post_sync_action
     settings["move_target"] = str(config.move_target) if config.move_target else ""
     settings["check_missing"] = config.check_missing
+    settings["daily_signin"] = config.daily_signin
     settings["notify_on"] = config.notify_on
     settings["notify_empty"] = config.notify_empty
     settings["notifications"] = list(config.notify_channels)
@@ -1084,6 +1091,19 @@ class WebApp:
                     cookies = dict(client.cookies)
                 self.sessions.save(cookies, profile)
                 return self._json(start_response, "200 OK", {"profile": profile})
+            if path == "/api/signin" and method == "POST":
+                if not self.config.daily_signin:
+                    raise ValueError("请先启用每日签到并保存设置")
+                with self.sessions.client() as client:
+                    with StateStore(self.config.db_path) as state:
+                        result = attempt_daily_signin(
+                            self.config,
+                            client,
+                            state,
+                            manual=True,
+                            raise_errors=True,
+                        )
+                return self._json(start_response, "200 OK", {"ok": True, "signin": result})
             return self._json(start_response, "404 Not Found", {"error": "unknown api"})
         except AuthError as exc:
             return self._json(start_response, "401 Unauthorized", {"error": str(exc)})
@@ -1105,11 +1125,13 @@ class WebApp:
         problem_counts: dict[str, int] = {"failed": 0, "permission": 0}
         runs: list[dict[str, Any]] = []
         pending_scan: dict[str, Any] | None = None
+        signin = signin_status(enabled=self.config.daily_signin)
         try:
             with StateStore(self.config.db_path) as state:
                 stats = state.stats()
                 problem_counts = state.problem_counts()
                 runs = state.recent_runs(RUN_HISTORY_LIMIT)
+                signin = signin_status(state, enabled=self.config.daily_signin)
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
         if not settings.get("check_missing", True):
@@ -1165,6 +1187,7 @@ class WebApp:
             "sync": self.sync.status(),
             "runs": runs,
             "pending_scan": pending_scan,
+            "signin": signin,
         }
 
     def _diagnostics(self) -> dict[str, Any]:
@@ -1215,6 +1238,7 @@ class WebApp:
             "post_sync_action": self.config.post_sync_action,
             "move_target": str(self.config.move_target) if self.config.move_target else "",
             "check_missing": self.config.check_missing,
+            "daily_signin": self.config.daily_signin,
             "notify_on": self.config.notify_on,
             "notify_empty": self.config.notify_empty,
             "notifications": list(self.config.notify_channels),

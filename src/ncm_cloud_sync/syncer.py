@@ -15,6 +15,7 @@ from .config import Config
 from .errors import AuthError, NcmSyncError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
 from .scanner import AudioFile, path_is_excluded, scan_with_report
+from .signin import maybe_daily_signin
 from .state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -407,6 +408,11 @@ class Syncer:
         )
         try:
             self._load_cloud(stats)
+            if self.config.daily_signin:
+                try:
+                    maybe_daily_signin(self.config, self.client, self.state)
+                except Exception:
+                    logger.warning("每日签到异常，已忽略，不影响同步", exc_info=True)
             self._preflight(stats)
         except Exception as exc:
             return self._abort_run(run_id, stats, started, f"上传前接口检查失败：{exc}")

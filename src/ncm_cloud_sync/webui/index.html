@@ -248,6 +248,18 @@
               <input id="checkMissing" type="checkbox" checked>
               <span>校验本地文件缺失（关闭后不再统计本地缺失；是否缺失以云盘是否仍有该歌曲为准）</span>
             </label>
+            <label class="check-field wide">
+              <input id="dailySignin" type="checkbox">
+              <span>每日自动签到（默认关闭；每天首次同步尝试一次，失败不影响同步）</span>
+            </label>
+            <div class="signin-panel wide">
+              <div class="signin-copy">
+                <span class="muted">今日签到</span>
+                <strong id="signinStatusText">未签到</strong>
+                <small id="signinHint" class="muted">签到只获得云贝，不是云盘空间；自动签到可能触发平台风控，请自行评估。</small>
+              </div>
+              <button id="signinNow" class="btn" type="button" disabled>立即签到</button>
+            </div>
             <div class="form-actions">
               <button id="saveSettings" class="btn primary" type="submit">保存设置</button>
               <span id="settingsStatus" class="status-line"></span>

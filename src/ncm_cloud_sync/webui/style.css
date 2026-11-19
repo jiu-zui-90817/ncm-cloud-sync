@@ -573,6 +573,40 @@ textarea:focus {
   accent-color: var(--red);
 }
 
+.signin-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.signin-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.signin-copy strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.signin-copy small {
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .signin-panel {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .form-actions {
   grid-column: 1 / -1;
   display: flex;

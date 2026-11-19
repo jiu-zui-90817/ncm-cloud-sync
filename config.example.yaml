@@ -81,6 +81,10 @@ move_target: null
 # 是否检查本地文件缺失。false 时概览和明细不显示本地缺失。
 check_missing: true
 
+# 每日签到：true 时每轮同步前自动签到一次（默认关闭）。
+# 签到只领取云贝，不增加云盘空间；使用非官方接口，可能有风控或活动规则风险。
+daily_signin: false
+
 # 同步结果通知时机：always / failure / success / never。
 notify_on: always
 
