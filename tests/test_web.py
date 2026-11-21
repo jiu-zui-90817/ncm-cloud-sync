@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import ncm_cloud_sync.notify as notify
 from ncm_cloud_sync.config import Config
+from ncm_cloud_sync.errors import ApiError
 from ncm_cloud_sync.session import load_session, save_session
 from ncm_cloud_sync.state import StateStore
 from ncm_cloud_sync.syncer import SyncStats
@@ -108,6 +109,7 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["settings"]["move_target"] == ""
     assert data["settings"]["check_missing"] is True
     assert data["settings"]["daily_signin"] is False
+    assert data["settings"]["signin_mobile"] is True
     assert data["settings"]["signin_window_start"] == "08:00"
     assert data["settings"]["signin_window_end"] == "23:00"
     assert data["signin"]["enabled"] is False
@@ -182,6 +184,7 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
             "exclude_dirs": [str(excluded)],
             "interval": 300,
             "rate_limit": 2.5,
+            "signin_mobile": False,
             "signin_window_start": "09:30",
             "signin_window_end": "21:15",
             "log_level": "DEBUG",
@@ -197,10 +200,12 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert saved["music_dirs"] == [str(music)]
     assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
+    assert saved["signin_mobile"] is False
     assert saved["signin_window_start"] == "09:30"
     assert saved["signin_window_end"] == "21:15"
     assert app.config.signin_window_start == "09:30"
     assert app.config.signin_window_end == "21:15"
+    assert app.config.signin_mobile is False
     assert saved["log_level"] == "DEBUG"
 
 
@@ -247,7 +252,9 @@ def test_signin_requires_enabled_and_records_manual_result(
         def __exit__(self, *exc_info):
             return False
 
-        def daily_signin(self):
+        def daily_signin(self, signin_type: int = 1):
+            if signin_type == 0:
+                return {"already": True, "message": "今天已经签到过了", "points": None}
             return {"already": False, "message": "签到成功", "points": 2}
 
     monkeypatch.setattr(app.sessions, "client", lambda: FakeSigninClient())
@@ -258,6 +265,44 @@ def test_signin_requires_enabled_and_records_manual_result(
 
     with StateStore(app.config.db_path) as state:
         assert state.get_meta("signin_status") == "success"
+
+
+def test_signin_api_returns_partial_when_mobile_fails(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    app = make_app(tmp_path)
+    status, _, _ = call(
+        app,
+        "/api/settings",
+        method="PUT",
+        body={
+            "music_dirs": [str(app.config.music_dirs[0])],
+            "daily_signin": True,
+            "signin_mobile": True,
+        },
+    )
+    assert status == "200 OK"
+
+    class FakePartialClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def daily_signin(self, signin_type: int = 1):
+            if signin_type == 0:
+                raise ApiError("手机端风控", code=-462)
+            return {"already": False, "message": "桌面端签到成功", "points": 2}
+
+    monkeypatch.setattr(app.sessions, "client", lambda: FakePartialClient())
+    status, _, data = call(app, "/api/signin", method="POST")
+    assert status == "200 OK"
+    assert data["signin"]["status"] == "partial"
+    assert [item["status"] for item in data["signin"]["details"]] == [
+        "success",
+        "failed",
+    ]
 
 
 def test_settings_post_sync_delete_disables_missing_by_default(tmp_path: Path) -> None:
@@ -978,13 +1023,17 @@ def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
     assert 'id="headerSignin"' in html
     assert 'id="signinWindowStart"' in html
     assert 'id="signinWindowEnd"' in html
+    assert 'id="signinMobile"' in html
     assert 'id="signinNow"' not in html
 
     status, _, script = call(app, "/app.js")
     assert status == "200 OK"
     assert 'el("dailySignin").checked = settings.daily_signin === true;' in script
     assert 'el("signinWindowStart").value = settings.signin_window_start || "08:00";' in script
+    assert 'el("signinMobile").checked = settings.signin_mobile !== false;' in script
     assert 'signin_window_start: el("signinWindowStart").value || "08:00",' in script
+    assert 'signin_mobile: el("signinMobile").checked,' in script
+    assert "function signinDetailText(details)" in script
     assert 'el("headerSignin").addEventListener("click", signinNow);' in script
     assert 'el("signinNow")' not in script
 

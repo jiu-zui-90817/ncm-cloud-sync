@@ -395,9 +395,20 @@
     });
   }
 
+  function signinDetailText(details) {
+    return (details || []).map(function (item) {
+      var label = item.label || "签到";
+      var message = item.message || item.status || "";
+      var suffix = item.points ? " +" + item.points : "";
+      return label + "：" + message + suffix;
+    }).join("；");
+  }
+
   function renderSignin(signin) {
     var data = signin || {};
     var signed = Boolean(data.today && (data.status === "success" || data.status === "already"));
+    var partial = Boolean(data.today && data.status === "partial");
+    var failed = Boolean(data.today && data.status === "failed");
     var text = "今日未签到";
     if (!data.enabled) {
       text = "未启用";
@@ -406,7 +417,9 @@
       if (data.points) {
         text += " · 云贝 +" + data.points;
       }
-    } else if (data.today && data.status === "failed") {
+    } else if (partial) {
+      text = "今日签到部分成功";
+    } else if (failed) {
       text = "今日签到失败";
     } else if (data.target) {
       text = "今日随机签到 · " + formatClock(data.target);
@@ -415,12 +428,15 @@
     var windowText = (data.window_start || "08:00") + "–" + (data.window_end || "23:00");
     var hint = "签到只获得云贝，不是云盘空间；自动签到在 " + windowText +
       " 之间随机进行，仍可能触发平台风控，请自行评估。";
-    if (data.today && data.message) {
+    var detailText = signinDetailText(data.details);
+    if (data.today && detailText) {
+      hint = detailText + " · " + hint;
+    } else if (data.today && data.message) {
       hint = data.message + " · " + hint;
     }
     el("signinHint").textContent = hint;
     var button = el("headerSignin");
-    button.textContent = state.signinBusy ? "签到中…" : (signed ? "今日已签到" : "立即签到");
+    button.textContent = state.signinBusy ? "签到中…" : (signed ? "今日已签到" : (partial || failed ? "重试签到" : "立即签到"));
     button.disabled = !data.enabled || signed || state.signinBusy;
     button.title = data.enabled ? "" : "请先在设置中启用每日签到";
   }
@@ -441,6 +457,7 @@
     el("moveTarget").value = settings.move_target || "";
     el("checkMissing").checked = settings.check_missing !== false;
     el("dailySignin").checked = settings.daily_signin === true;
+    el("signinMobile").checked = settings.signin_mobile !== false;
     el("signinWindowStart").value = settings.signin_window_start || "08:00";
     el("signinWindowEnd").value = settings.signin_window_end || "23:00";
     el("moveTargetField").classList.toggle("hidden", action !== "move");
@@ -1602,6 +1619,7 @@
       move_target: el("moveTarget").value.trim(),
       check_missing: el("checkMissing").checked,
       daily_signin: el("dailySignin").checked,
+      signin_mobile: el("signinMobile").checked,
       signin_window_start: el("signinWindowStart").value || "08:00",
       signin_window_end: el("signinWindowEnd").value || "23:00",
       log_level: el("logLevel").value,

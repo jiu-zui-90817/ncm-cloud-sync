@@ -115,6 +115,7 @@ class Config:
     move_target: Path | None = None
     check_missing: bool = True
     daily_signin: bool = False
+    signin_mobile: bool = True
     signin_window_start: str = "08:00"
     signin_window_end: str = "23:00"
     notify_on: str = "always"
@@ -186,6 +187,7 @@ class Config:
             "move_target": str(self.move_target) if self.move_target else None,
             "check_missing": self.check_missing,
             "daily_signin": self.daily_signin,
+            "signin_mobile": self.signin_mobile,
             "signin_window_start": self.signin_window_start,
             "signin_window_end": self.signin_window_end,
             "notify_on": self.notify_on,
@@ -253,6 +255,8 @@ class Config:
             values["check_missing"] = parse_bool(raw["check_missing"], True)
         if "daily_signin" in raw:
             values["daily_signin"] = parse_bool(raw["daily_signin"], False)
+        if "signin_mobile" in raw:
+            values["signin_mobile"] = parse_bool(raw["signin_mobile"], True)
         for key in ("signin_window_start", "signin_window_end"):
             if key in raw and raw[key] is not None:
                 values[key] = str(raw[key]).strip()
@@ -384,6 +388,9 @@ class Config:
         daily_signin = text("NCM_CLOUD_SYNC_DAILY_SIGNIN")
         if daily_signin is not None:
             values["daily_signin"] = parse_bool(daily_signin, False)
+        signin_mobile = text("NCM_CLOUD_SYNC_SIGNIN_MOBILE")
+        if signin_mobile is not None:
+            values["signin_mobile"] = parse_bool(signin_mobile, True)
         for name, key in (
             ("NCM_CLOUD_SYNC_SIGNIN_WINDOW_START", "signin_window_start"),
             ("NCM_CLOUD_SYNC_SIGNIN_WINDOW_END", "signin_window_end"),

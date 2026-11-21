@@ -756,6 +756,20 @@ def test_daily_signin_parses_success(monkeypatch: Any) -> None:
     assert calls == [(f"{client_module.BASE_URL}/api/point/dailyTask", {"type": 1}, False)]
 
 
+def test_daily_signin_mobile_uses_type_zero(monkeypatch: Any) -> None:
+    client = make_client()
+    calls: list[dict[str, Any] | None] = []
+
+    def fake_get(url: str, params=None, *, check=True):
+        calls.append(params)
+        return {"code": 200, "data": {"code": 200, "message": "签到成功", "point": 50}}
+
+    monkeypatch.setattr(client, "_get_json", fake_get)
+    result = client.daily_signin(0)
+    assert result["points"] == 50
+    assert calls == [{"type": 0}]
+
+
 def test_daily_signin_already_signed(monkeypatch: Any) -> None:
     client = make_client()
     monkeypatch.setattr(

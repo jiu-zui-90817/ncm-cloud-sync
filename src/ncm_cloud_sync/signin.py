@@ -2,10 +2,12 @@
 
 签到只使用账号已有 Cookie 调用网页端接口，默认关闭。签到失败不会影响同步。
 每天在用户设定的本地时间范围内（默认 08:00–23:00）随机选择一个时刻，避免固定时间请求。
+可选同时调用手机端（type=0）任务；两端独立发奖，同一天同一端重复请求会返回已签到。
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
 import threading
@@ -13,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import Config, normalize_signin_window
-from .errors import ConfigError
+from .errors import ApiError, ConfigError
 from .state import StateStore
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ SIGNIN_POINTS = "signin_points"
 SIGNIN_AT = "signin_at"
 SIGNIN_TARGET = "signin_target"
 SIGNIN_TARGET_WINDOW = "signin_target_window"
+SIGNIN_DETAILS = "signin_details"
 
 DEFAULT_SIGNIN_WINDOW_START = "08:00"
 DEFAULT_SIGNIN_WINDOW_END = "23:00"
@@ -50,6 +53,16 @@ def _parse_datetime(raw: str) -> datetime | None:
         return datetime.fromisoformat(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_details(raw: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _target_for_today(
@@ -92,12 +105,25 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _as_points(value: str) -> int | None:
+def _as_points(value: Any) -> int | None:
     try:
         points = int(value)
     except (TypeError, ValueError):
         return None
     return points if points > 0 else None
+
+
+def _detail_message(details: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in details:
+        label = str(item.get("label") or "签到")
+        message = str(item.get("message") or "")
+        points = _as_points(item.get("points"))
+        text = f"{label}：{message}" if message else label
+        if points:
+            text += f" +{points}"
+        parts.append(text)
+    return "；".join(parts)
 
 
 def signin_status(
@@ -118,12 +144,14 @@ def signin_status(
     points: int | None = None
     at = ""
     target = ""
+    details: list[dict[str, Any]] = []
     if state is not None:
         date = state.get_meta(SIGNIN_DATE, "") or ""
         status = state.get_meta(SIGNIN_STATUS, "") or ""
         message = state.get_meta(SIGNIN_MESSAGE, "") or ""
         points = _as_points(state.get_meta(SIGNIN_POINTS, "") or "")
         at = state.get_meta(SIGNIN_AT, "") or ""
+        details = _parse_details(state.get_meta(SIGNIN_DETAILS, "") or "")
         raw_target = state.get_meta(SIGNIN_TARGET, "") or ""
         parsed_target = _parse_datetime(raw_target)
         if (
@@ -142,6 +170,7 @@ def signin_status(
         "target": target,
         "window_start": start_text,
         "window_end": end_text,
+        "details": details,
         "today": date == now.date().isoformat(),
     }
 
@@ -153,12 +182,43 @@ def _record(
     status: str,
     message: str,
     points: int | None,
+    details: list[dict[str, Any]],
 ) -> None:
     state.set_meta(SIGNIN_DATE, date)
     state.set_meta(SIGNIN_STATUS, status)
     state.set_meta(SIGNIN_MESSAGE, message[:500])
     state.set_meta(SIGNIN_POINTS, str(points or ""))
     state.set_meta(SIGNIN_AT, _utc_now())
+    state.set_meta(SIGNIN_DETAILS, json.dumps(details, ensure_ascii=False))
+
+
+def _signin_one(client: Any, signin_type: int, label: str) -> dict[str, Any]:
+    try:
+        result = client.daily_signin(signin_type)
+    except Exception as exc:
+        return {
+            "platform": "mobile" if signin_type == 0 else "desktop",
+            "label": label,
+            "signin_type": signin_type,
+            "status": "failed",
+            "message": str(exc),
+            "points": None,
+        }
+    already = bool(result.get("already"))
+    status = "already" if already else "success"
+    message = str(
+        result.get("message")
+        or ("今天已经签到过了" if already else "签到成功")
+    )
+    return {
+        "platform": "mobile" if signin_type == 0 else "desktop",
+        "label": label,
+        "signin_type": signin_type,
+        "status": status,
+        "already": already,
+        "message": message,
+        "points": _as_points(result.get("points")),
+    }
 
 
 def _attempt_locked(
@@ -186,7 +246,7 @@ def _attempt_locked(
     current = status_snapshot()
     if current["today"] and current["status"] in {"success", "already"}:
         return {**current, "skipped": True, "pending": False}
-    if current["today"] and current["status"] == "failed" and not manual:
+    if current["today"] and current["status"] in {"failed", "partial"} and not manual:
         return {**current, "skipped": True, "pending": False}
     if not manual:
         target = _target_for_today(state, now, window_start, window_end)
@@ -198,28 +258,43 @@ def _attempt_locked(
                 "pending": True,
                 "target": target.isoformat(timespec="seconds"),
             }
-    try:
-        result = client.daily_signin()
-    except Exception as exc:
-        _record(
-            state,
-            date=today,
-            status="failed",
-            message=str(exc),
-            points=None,
-        )
-        logger.warning("每日签到失败：%s", exc)
-        if raise_errors:
-            raise
-        return {**status_snapshot(), "skipped": False, "pending": False}
-    status = "already" if result.get("already") else "success"
-    points = result.get("points")
-    message = str(result.get("message") or ("今天已经签到过了" if status == "already" else "签到成功"))
-    _record(state, date=today, status=status, message=message, points=points)
-    if status == "already":
+
+    targets = [(1, "桌面端")]
+    if config.signin_mobile:
+        targets.append((0, "手机端"))
+    details = [_signin_one(client, signin_type, label) for signin_type, label in targets]
+    successes = [item for item in details if item["status"] in {"success", "already"}]
+    failures = [item for item in details if item["status"] == "failed"]
+    if not failures:
+        status = "already" if all(item["status"] == "already" for item in details) else "success"
+    elif not successes:
+        status = "failed"
+    else:
+        status = "partial"
+    points = sum(
+        int(item["points"])
+        for item in details
+        if _as_points(item.get("points")) is not None
+    )
+    message = _detail_message(details)
+    _record(
+        state,
+        date=today,
+        status=status,
+        message=message,
+        points=points or None,
+        details=details,
+    )
+    if status == "failed":
+        logger.warning("每日签到失败：%s", message)
+    elif status == "partial":
+        logger.warning("每日签到部分成功：%s", message)
+    elif status == "already":
         logger.info("每日签到：%s", message)
     else:
-        logger.info("每日签到成功：%s%s", message, f"，云贝 +{points}" if points else "")
+        logger.info("每日签到成功：%s", message)
+    if raise_errors and status == "failed":
+        raise ApiError(message)
     return {**status_snapshot(), "skipped": False, "pending": False}
 
 
@@ -234,8 +309,9 @@ def attempt_daily_signin(
 ) -> dict[str, Any]:
     """执行一次签到。
 
-    自动模式每天最多尝试一次（失败也等第二天），并且要等到当天随机时刻；
-    手动模式忽略随机时刻，允许在当天失败后重试，但已经签到成功时不会重复请求。
+    自动模式每天最多尝试一次（失败或部分成功也等第二天），并且要等到当天随机时刻；
+    手动模式忽略随机时刻，允许在当天失败/部分成功后重试，但已经签到成功时不会重复请求。
+    默认先签桌面端（type=1），开启 signin_mobile 后再签手机端（type=0）。
     """
     if not config.daily_signin:
         raise ConfigError("请先启用每日签到并保存设置")

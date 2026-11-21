@@ -35,7 +35,7 @@ class FakeClient:
         self.calls: list[str] = []
         self.signin_calls = 0
 
-    def daily_signin(self):
+    def daily_signin(self, signin_type: int = 1):
         self.signin_calls += 1
         return {"already": False, "message": "签到成功", "points": 2}
 
@@ -87,10 +87,10 @@ def test_daily_signin_runs_once_per_day(tmp_path: Path) -> None:
         state.set_meta(SIGNIN_TARGET, datetime.now().astimezone().isoformat(timespec="seconds"))
         state.set_meta(SIGNIN_TARGET_WINDOW, "08:00-23:00")
         Syncer(config, client, state).run_once()
-        assert client.signin_calls == 1
+        assert client.signin_calls == 2
         assert state.get_meta("signin_status") == "success"
         Syncer(config, client, state).run_once()
-        assert client.signin_calls == 1
+        assert client.signin_calls == 2
 
 
 def test_upload_then_up_to_date(tmp_path: Path) -> None:

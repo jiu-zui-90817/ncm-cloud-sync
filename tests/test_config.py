@@ -130,6 +130,22 @@ def test_signin_window_defaults_and_overrides(tmp_path: Path) -> None:
     assert env.signin_window_end == "20:00"
 
 
+def test_signin_mobile_defaults_true_and_can_disable(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    default = Config.load(write_config(tmp_path, music), env={})
+    assert default.signin_mobile is True
+    disabled = Config.load(
+        write_config(tmp_path, music, "signin_mobile: false\n"), env={}
+    )
+    assert disabled.signin_mobile is False
+    from_env = Config.load(
+        write_config(tmp_path, music, "signin_mobile: true\n"),
+        env={"NCM_CLOUD_SYNC_SIGNIN_MOBILE": "0"},
+    )
+    assert from_env.signin_mobile is False
+
+
 def test_signin_window_rejects_invalid_values(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

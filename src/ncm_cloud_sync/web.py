@@ -64,6 +64,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "move_target": "",
     "check_missing": True,
     "daily_signin": False,
+    "signin_mobile": True,
     "signin_window_start": "08:00",
     "signin_window_end": "23:00",
     "notify_on": "always",
@@ -287,6 +288,7 @@ class SettingsStore:
         else:
             data["check_missing"] = action == "none"
         data["daily_signin"] = _as_bool(raw.get("daily_signin"), False)
+        data["signin_mobile"] = _as_bool(raw.get("signin_mobile"), True)
         try:
             data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
                 raw.get("signin_window_start", DEFAULT_SETTINGS["signin_window_start"]),
@@ -341,6 +343,7 @@ class SettingsStore:
         else:
             data["check_missing"] = action == "none"
         data["daily_signin"] = _as_bool(payload.get("daily_signin"), False)
+        data["signin_mobile"] = _as_bool(payload.get("signin_mobile"), True)
         try:
             data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
                 payload.get("signin_window_start", DEFAULT_SETTINGS["signin_window_start"]),
@@ -391,6 +394,8 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
         config.check_missing = bool(settings.get("check_missing"))
     if "daily_signin" in settings:
         config.daily_signin = bool(settings.get("daily_signin"))
+    if "signin_mobile" in settings:
+        config.signin_mobile = bool(settings.get("signin_mobile"))
     if "signin_window_start" in settings or "signin_window_end" in settings:
         config.signin_window_start, config.signin_window_end = normalize_signin_window(
             settings.get("signin_window_start", config.signin_window_start),
@@ -424,6 +429,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["move_target"] = str(config.move_target) if config.move_target else ""
     settings["check_missing"] = config.check_missing
     settings["daily_signin"] = config.daily_signin
+    settings["signin_mobile"] = config.signin_mobile
     settings["signin_window_start"] = config.signin_window_start
     settings["signin_window_end"] = config.signin_window_end
     settings["notify_on"] = config.notify_on
@@ -1284,6 +1290,7 @@ class WebApp:
             "move_target": str(self.config.move_target) if self.config.move_target else "",
             "check_missing": self.config.check_missing,
             "daily_signin": self.config.daily_signin,
+            "signin_mobile": self.config.signin_mobile,
             "signin_window_start": self.config.signin_window_start,
             "signin_window_end": self.config.signin_window_end,
             "notify_on": self.config.notify_on,
