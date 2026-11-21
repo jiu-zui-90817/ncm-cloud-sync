@@ -97,6 +97,57 @@ def test_post_sync_defaults_and_delete_disables_missing(tmp_path: Path) -> None:
     assert explicit.check_missing is True
 
 
+def test_signin_window_defaults_and_overrides(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    default = Config.load(write_config(tmp_path, music), env={})
+    assert default.signin_window_start == "08:00"
+    assert default.signin_window_end == "23:00"
+
+    custom = Config.load(
+        write_config(
+            tmp_path,
+            music,
+            'signin_window_start: "09:30"\nsignin_window_end: "21:15"\n',
+        ),
+        env={},
+    )
+    assert custom.signin_window_start == "09:30"
+    assert custom.signin_window_end == "21:15"
+
+    env = Config.load(
+        write_config(
+            tmp_path,
+            music,
+            'signin_window_start: "09:30"\nsignin_window_end: "21:15"\n',
+        ),
+        env={
+            "NCM_CLOUD_SYNC_SIGNIN_WINDOW_START": "10:00",
+            "NCM_CLOUD_SYNC_SIGNIN_WINDOW_END": "20:00",
+        },
+    )
+    assert env.signin_window_start == "10:00"
+    assert env.signin_window_end == "20:00"
+
+
+def test_signin_window_rejects_invalid_values(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    with pytest.raises(ConfigError, match="签到开始时间"):
+        Config.load(
+            write_config(tmp_path, music, 'signin_window_start: "25:00"\n'), env={}
+        )
+    with pytest.raises(ConfigError, match="必须早于"):
+        Config.load(
+            write_config(
+                tmp_path,
+                music,
+                'signin_window_start: "22:00"\nsignin_window_end: "21:00"\n',
+            ),
+            env={},
+        )
+
+
 def test_move_target_inside_music_dir_is_scan_excluded(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()

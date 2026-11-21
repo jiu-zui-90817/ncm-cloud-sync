@@ -441,6 +441,8 @@
     el("moveTarget").value = settings.move_target || "";
     el("checkMissing").checked = settings.check_missing !== false;
     el("dailySignin").checked = settings.daily_signin === true;
+    el("signinWindowStart").value = settings.signin_window_start || "08:00";
+    el("signinWindowEnd").value = settings.signin_window_end || "23:00";
     el("moveTargetField").classList.toggle("hidden", action !== "move");
     el("logLevel").value = settings.log_level || "INFO";
     el("notifyOn").value = settings.notify_on || "always";
@@ -1600,6 +1602,8 @@
       move_target: el("moveTarget").value.trim(),
       check_missing: el("checkMissing").checked,
       daily_signin: el("dailySignin").checked,
+      signin_window_start: el("signinWindowStart").value || "08:00",
+      signin_window_end: el("signinWindowEnd").value || "23:00",
       log_level: el("logLevel").value,
       notify_on: el("notifyOn").value,
       notify_empty: el("notifyEmpty").checked,

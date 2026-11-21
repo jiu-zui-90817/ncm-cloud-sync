@@ -1,7 +1,7 @@
 """网易云每日签到。
 
 签到只使用账号已有 Cookie 调用网页端接口，默认关闭。签到失败不会影响同步。
-每天在本地时间 08:00–23:00 之间随机选择一个时刻，避免每天固定时间请求。
+每天在用户设定的本地时间范围内（默认 08:00–23:00）随机选择一个时刻，避免固定时间请求。
 """
 
 from __future__ import annotations
@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .config import Config
+from .config import Config, normalize_signin_window
 from .errors import ConfigError
 from .state import StateStore
 
@@ -24,9 +24,10 @@ SIGNIN_MESSAGE = "signin_message"
 SIGNIN_POINTS = "signin_points"
 SIGNIN_AT = "signin_at"
 SIGNIN_TARGET = "signin_target"
+SIGNIN_TARGET_WINDOW = "signin_target_window"
 
-SIGNIN_WINDOW_START_HOUR = 8
-SIGNIN_WINDOW_END_HOUR = 23
+DEFAULT_SIGNIN_WINDOW_START = "08:00"
+DEFAULT_SIGNIN_WINDOW_END = "23:00"
 
 _SIGNIN_LOCK = threading.Lock()
 
@@ -51,20 +52,39 @@ def _parse_datetime(raw: str) -> datetime | None:
         return None
 
 
-def _target_for_today(state: StateStore, now: datetime) -> datetime:
-    """读取或生成今天的随机签到时刻。同一日期内不会重新抽取。"""
+def _target_for_today(
+    state: StateStore,
+    now: datetime,
+    window_start: str,
+    window_end: str,
+) -> datetime:
+    """读取或生成今天的随机签到时刻；窗口变化或跨日时重新抽取。"""
+    start_text, end_text = normalize_signin_window(window_start, window_end)
+    signature = f"{start_text}-{end_text}"
     raw = state.get_meta(SIGNIN_TARGET, "") or ""
     parsed = _parse_datetime(raw)
-    if parsed is not None and parsed.astimezone().date() == now.date():
+    if (
+        parsed is not None
+        and parsed.astimezone().date() == now.date()
+        and state.get_meta(SIGNIN_TARGET_WINDOW, "") == signature
+    ):
         return parsed
-    hour = SIGNIN_WINDOW_START_HOUR + secrets.randbelow(
-        SIGNIN_WINDOW_END_HOUR - SIGNIN_WINDOW_START_HOUR
-    )
-    minute = 1 + secrets.randbelow(59)
-    second = secrets.randbelow(60)
-    target = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
+    start_hour, start_minute = (int(part) for part in start_text.split(":"))
+    end_hour, end_minute = (int(part) for part in end_text.split(":"))
+    start_offset = start_hour * 3600 + start_minute * 60
+    end_offset = end_hour * 3600 + end_minute * 60
+    offset = secrets.randbelow(end_offset - start_offset)
+    target = now.replace(
+        hour=start_hour, minute=start_minute, second=0, microsecond=0
+    ) + timedelta(seconds=offset)
     state.set_meta(SIGNIN_TARGET, target.isoformat(timespec="seconds"))
-    logger.info("今日签到随机时间：%s", target.strftime("%H:%M:%S"))
+    state.set_meta(SIGNIN_TARGET_WINDOW, signature)
+    logger.info(
+        "今日签到随机时间：%s（窗口 %s–%s）",
+        target.strftime("%H:%M:%S"),
+        start_text,
+        end_text,
+    )
     return target
 
 
@@ -84,10 +104,14 @@ def signin_status(
     state: StateStore | None = None,
     *,
     enabled: bool = False,
+    window_start: str = DEFAULT_SIGNIN_WINDOW_START,
+    window_end: str = DEFAULT_SIGNIN_WINDOW_END,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """返回签到状态；没有状态库时返回未签到。"""
     now = _local_now(now)
+    start_text, end_text = normalize_signin_window(window_start, window_end)
+    signature = f"{start_text}-{end_text}"
     date = ""
     status = ""
     message = ""
@@ -102,7 +126,11 @@ def signin_status(
         at = state.get_meta(SIGNIN_AT, "") or ""
         raw_target = state.get_meta(SIGNIN_TARGET, "") or ""
         parsed_target = _parse_datetime(raw_target)
-        if parsed_target is not None and parsed_target.astimezone().date() == now.date():
+        if (
+            parsed_target is not None
+            and parsed_target.astimezone().date() == now.date()
+            and state.get_meta(SIGNIN_TARGET_WINDOW, "") == signature
+        ):
             target = raw_target
     return {
         "enabled": enabled,
@@ -112,8 +140,8 @@ def signin_status(
         "points": points,
         "at": at,
         "target": target,
-        "window_start": f"{SIGNIN_WINDOW_START_HOUR:02d}:00",
-        "window_end": f"{SIGNIN_WINDOW_END_HOUR:02d}:00",
+        "window_start": start_text,
+        "window_end": end_text,
         "today": date == now.date().isoformat(),
     }
 
@@ -143,17 +171,29 @@ def _attempt_locked(
     raise_errors: bool,
 ) -> dict[str, Any]:
     today = now.date().isoformat()
-    current = signin_status(state, enabled=True, now=now)
+    window_start = config.signin_window_start
+    window_end = config.signin_window_end
+
+    def status_snapshot() -> dict[str, Any]:
+        return signin_status(
+            state,
+            enabled=True,
+            window_start=window_start,
+            window_end=window_end,
+            now=now,
+        )
+
+    current = status_snapshot()
     if current["today"] and current["status"] in {"success", "already"}:
         return {**current, "skipped": True, "pending": False}
     if current["today"] and current["status"] == "failed" and not manual:
         return {**current, "skipped": True, "pending": False}
     if not manual:
-        target = _target_for_today(state, now)
+        target = _target_for_today(state, now, window_start, window_end)
         if now < target:
             logger.debug("今日签到时间未到：%s", target.isoformat(timespec="seconds"))
             return {
-                **signin_status(state, enabled=True, now=now),
+                **status_snapshot(),
                 "skipped": True,
                 "pending": True,
                 "target": target.isoformat(timespec="seconds"),
@@ -171,7 +211,7 @@ def _attempt_locked(
         logger.warning("每日签到失败：%s", exc)
         if raise_errors:
             raise
-        return {**signin_status(state, enabled=True, now=now), "skipped": False, "pending": False}
+        return {**status_snapshot(), "skipped": False, "pending": False}
     status = "already" if result.get("already") else "success"
     points = result.get("points")
     message = str(result.get("message") or ("今天已经签到过了" if status == "already" else "签到成功"))
@@ -180,7 +220,7 @@ def _attempt_locked(
         logger.info("每日签到：%s", message)
     else:
         logger.info("每日签到成功：%s%s", message, f"，云贝 +{points}" if points else "")
-    return {**signin_status(state, enabled=True, now=now), "skipped": False, "pending": False}
+    return {**status_snapshot(), "skipped": False, "pending": False}
 
 
 def attempt_daily_signin(

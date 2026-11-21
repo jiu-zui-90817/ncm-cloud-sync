@@ -2,6 +2,12 @@
 
 只记录用户可感知的变化。接口与兼容细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)，更早版本见 GitHub Releases。
 
+## 0.3.23
+
+- 每日签到时间范围可在设置里自定义：默认 08:00–23:00，可填 `00:00–23:59` 内任意区间，开始必须早于结束。
+- 自动签到仍只在范围内随机一次；修改范围后当天会重新抽取，手动签到不受范围限制。
+- 配置项新增 `signin_window_start` / `signin_window_end`，对应环境变量 `NCM_CLOUD_SYNC_SIGNIN_WINDOW_START` / `NCM_CLOUD_SYNC_SIGNIN_WINDOW_END`。
+
 ## 0.3.22
 
 - 修复“每日自动签到”开关保存后重新打开页面仍显示关闭：设置页现在会按已保存的 `daily_signin` 回填复选框，后端持久化本身没有问题。

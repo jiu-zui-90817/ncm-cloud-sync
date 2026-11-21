@@ -81,10 +81,15 @@ move_target: null
 # 是否检查本地文件缺失。false 时概览和明细不显示本地缺失。
 check_missing: true
 
-# 每日签到：true 时每天在本地时间 08:00–23:00 之间随机自动签到一次（默认关闭）。
+# 每日签到：true 时每天在下面配置的时间范围内随机自动签到一次（默认关闭）。
 # Web 和 daemon 每 60 秒检查一次，到点才请求；同一天不会重复自动签到；手动签到不受随机时间限制。
 # 签到只领取云贝，不增加云盘空间；使用非官方接口，可能有风控或活动规则风险。
 daily_signin: false
+
+# 自动签到随机窗口，格式 HH:MM；开始必须早于结束，默认 08:00–23:00。
+# 修改窗口后当天会按新范围重新抽取随机时刻。
+signin_window_start: "08:00"
+signin_window_end: "23:00"
 
 # 同步结果通知时机：always / failure / success / never。
 notify_on: always

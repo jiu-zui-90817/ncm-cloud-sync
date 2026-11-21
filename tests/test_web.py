@@ -108,8 +108,12 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["settings"]["move_target"] == ""
     assert data["settings"]["check_missing"] is True
     assert data["settings"]["daily_signin"] is False
+    assert data["settings"]["signin_window_start"] == "08:00"
+    assert data["settings"]["signin_window_end"] == "23:00"
     assert data["signin"]["enabled"] is False
     assert data["signin"]["status"] == ""
+    assert data["signin"]["window_start"] == "08:00"
+    assert data["signin"]["window_end"] == "23:00"
     assert data["sync"]["state"] == "idle"
     assert data["sync"]["can_pause"] is False
     assert data["runs"] == []
@@ -178,6 +182,8 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
             "exclude_dirs": [str(excluded)],
             "interval": 300,
             "rate_limit": 2.5,
+            "signin_window_start": "09:30",
+            "signin_window_end": "21:15",
             "log_level": "DEBUG",
         },
     )
@@ -191,7 +197,26 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert saved["music_dirs"] == [str(music)]
     assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
+    assert saved["signin_window_start"] == "09:30"
+    assert saved["signin_window_end"] == "21:15"
+    assert app.config.signin_window_start == "09:30"
+    assert app.config.signin_window_end == "21:15"
     assert saved["log_level"] == "DEBUG"
+
+
+def test_settings_rejects_invalid_signin_window(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    base = {"music_dirs": [str(app.config.music_dirs[0])]}
+    invalid = [
+        {"signin_window_start": "25:00", "signin_window_end": "23:00"},
+        {"signin_window_start": "22:00", "signin_window_end": "21:00"},
+    ]
+    for extra in invalid:
+        status, _, data = call(
+            app, "/api/settings", method="PUT", body={**base, **extra}
+        )
+        assert status == "400 Bad Request"
+        assert "签到" in data["error"]
 
 
 def test_signin_requires_enabled_and_records_manual_result(
@@ -951,11 +976,15 @@ def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
     status, _, html = call(app, "/")
     assert status == "200 OK"
     assert 'id="headerSignin"' in html
+    assert 'id="signinWindowStart"' in html
+    assert 'id="signinWindowEnd"' in html
     assert 'id="signinNow"' not in html
 
     status, _, script = call(app, "/app.js")
     assert status == "200 OK"
     assert 'el("dailySignin").checked = settings.daily_signin === true;' in script
+    assert 'el("signinWindowStart").value = settings.signin_window_start || "08:00";' in script
+    assert 'signin_window_start: el("signinWindowStart").value || "08:00",' in script
     assert 'el("headerSignin").addEventListener("click", signinNow);' in script
     assert 'el("signinNow")' not in script
 

@@ -251,8 +251,17 @@
             </label>
             <label class="check-field wide">
               <input id="dailySignin" type="checkbox">
-              <span>每日自动签到（默认关闭；每天 08:00–23:00 随机时间签到一次，失败不影响同步）</span>
+              <span>每日自动签到（默认关闭；每天在设定时间范围内随机签到一次，失败不影响同步）</span>
             </label>
+            <div class="field wide" id="signinWindowField">
+              <span>签到时间范围（本地时间）</span>
+              <div class="time-range">
+                <input id="signinWindowStart" type="time" step="60" value="08:00">
+                <span class="muted">至</span>
+                <input id="signinWindowEnd" type="time" step="60" value="23:00">
+              </div>
+              <small class="muted">开始必须早于结束；默认 08:00–23:00。自动签到只会在该范围内随机一次，手动签到不受限制。</small>
+            </div>
             <div class="signin-panel wide">
               <div class="signin-copy">
                 <span class="muted">今日签到</span>

@@ -24,7 +24,7 @@ else:  # wsgiref.types 只在 Python 3.11+ 存在
 
 from . import __version__, notify
 from .client import CloudClient
-from .config import Config
+from .config import Config, normalize_signin_window
 from .cookies import ensure_defaults, parse_cookie
 from .errors import ApiError, AuthError, ConfigError, UploadError, NcmSyncError
 from .login import apply_qr_cookies, build_qr_url
@@ -64,6 +64,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "move_target": "",
     "check_missing": True,
     "daily_signin": False,
+    "signin_window_start": "08:00",
+    "signin_window_end": "23:00",
     "notify_on": "always",
     "notify_empty": False,
     "notifications": [],
@@ -285,6 +287,14 @@ class SettingsStore:
         else:
             data["check_missing"] = action == "none"
         data["daily_signin"] = _as_bool(raw.get("daily_signin"), False)
+        try:
+            data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
+                raw.get("signin_window_start", DEFAULT_SETTINGS["signin_window_start"]),
+                raw.get("signin_window_end", DEFAULT_SETTINGS["signin_window_end"]),
+            )
+        except ConfigError:
+            data["signin_window_start"] = DEFAULT_SETTINGS["signin_window_start"]
+            data["signin_window_end"] = DEFAULT_SETTINGS["signin_window_end"]
         notify_on = str(raw.get("notify_on") or "always").lower()
         data["notify_on"] = notify_on if notify_on in {"always", "failure", "success", "never"} else "always"
         data["notify_empty"] = _as_bool(raw.get("notify_empty"), False)
@@ -331,6 +341,13 @@ class SettingsStore:
         else:
             data["check_missing"] = action == "none"
         data["daily_signin"] = _as_bool(payload.get("daily_signin"), False)
+        try:
+            data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
+                payload.get("signin_window_start", DEFAULT_SETTINGS["signin_window_start"]),
+                payload.get("signin_window_end", DEFAULT_SETTINGS["signin_window_end"]),
+            )
+        except ConfigError as exc:
+            raise ValueError(str(exc)) from exc
         notify_on = str(payload.get("notify_on") or "always").lower()
         if notify_on not in {"always", "failure", "success", "never"}:
             raise ValueError("通知时机必须是 always/failure/success/never")
@@ -374,6 +391,11 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
         config.check_missing = bool(settings.get("check_missing"))
     if "daily_signin" in settings:
         config.daily_signin = bool(settings.get("daily_signin"))
+    if "signin_window_start" in settings or "signin_window_end" in settings:
+        config.signin_window_start, config.signin_window_end = normalize_signin_window(
+            settings.get("signin_window_start", config.signin_window_start),
+            settings.get("signin_window_end", config.signin_window_end),
+        )
     notify_on = str(settings.get("notify_on") or config.notify_on).lower()
     if notify_on in {"always", "failure", "success", "never"}:
         config.notify_on = notify_on
@@ -402,6 +424,8 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["move_target"] = str(config.move_target) if config.move_target else ""
     settings["check_missing"] = config.check_missing
     settings["daily_signin"] = config.daily_signin
+    settings["signin_window_start"] = config.signin_window_start
+    settings["signin_window_end"] = config.signin_window_end
     settings["notify_on"] = config.notify_on
     settings["notify_empty"] = config.notify_empty
     settings["notifications"] = list(config.notify_channels)
@@ -1137,13 +1161,22 @@ class WebApp:
         problem_counts: dict[str, int] = {"failed": 0, "permission": 0}
         runs: list[dict[str, Any]] = []
         pending_scan: dict[str, Any] | None = None
-        signin = signin_status(enabled=self.config.daily_signin)
+        signin = signin_status(
+            enabled=self.config.daily_signin,
+            window_start=self.config.signin_window_start,
+            window_end=self.config.signin_window_end,
+        )
         try:
             with StateStore(self.config.db_path) as state:
                 stats = state.stats()
                 problem_counts = state.problem_counts()
                 runs = state.recent_runs(RUN_HISTORY_LIMIT)
-                signin = signin_status(state, enabled=self.config.daily_signin)
+                signin = signin_status(
+                    state,
+                    enabled=self.config.daily_signin,
+                    window_start=self.config.signin_window_start,
+                    window_end=self.config.signin_window_end,
+                )
         except Exception:
             logger.warning("读取状态数据库失败", exc_info=True)
         if not settings.get("check_missing", True):
@@ -1251,6 +1284,8 @@ class WebApp:
             "move_target": str(self.config.move_target) if self.config.move_target else "",
             "check_missing": self.config.check_missing,
             "daily_signin": self.config.daily_signin,
+            "signin_window_start": self.config.signin_window_start,
+            "signin_window_end": self.config.signin_window_end,
             "notify_on": self.config.notify_on,
             "notify_empty": self.config.notify_empty,
             "notifications": list(self.config.notify_channels),

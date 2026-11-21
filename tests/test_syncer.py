@@ -11,7 +11,7 @@ import pytest
 from ncm_cloud_sync.client import UploadResult
 from ncm_cloud_sync.config import Config
 from ncm_cloud_sync.errors import NosUnavailableError, RateLimitError, UploadError
-from ncm_cloud_sync.signin import SIGNIN_TARGET
+from ncm_cloud_sync.signin import SIGNIN_TARGET, SIGNIN_TARGET_WINDOW
 from ncm_cloud_sync.state import StateStore
 from ncm_cloud_sync.syncer import Syncer
 
@@ -85,6 +85,7 @@ def test_daily_signin_runs_once_per_day(tmp_path: Path) -> None:
     client = FakeClient()
     with StateStore(config.db_path) as state:
         state.set_meta(SIGNIN_TARGET, datetime.now().astimezone().isoformat(timespec="seconds"))
+        state.set_meta(SIGNIN_TARGET_WINDOW, "08:00-23:00")
         Syncer(config, client, state).run_once()
         assert client.signin_calls == 1
         assert state.get_meta("signin_status") == "success"

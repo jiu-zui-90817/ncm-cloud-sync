@@ -9,6 +9,7 @@ from ncm_cloud_sync.config import Config
 from ncm_cloud_sync.errors import ApiError, ConfigError
 from ncm_cloud_sync.signin import (
     SIGNIN_TARGET,
+    SIGNIN_TARGET_WINDOW,
     attempt_daily_signin,
     signin_status,
 )
@@ -40,10 +41,15 @@ def local_now() -> datetime:
     return datetime.now().astimezone()
 
 
+def window_key(start: str = "08:00", end: str = "23:00") -> str:
+    return f"{start}-{end}"
+
+
 def make_due(state: StateStore, now: datetime | None = None) -> datetime:
     now = now or local_now()
     # 把今天的随机时刻设成“已经到点”，避免测试依赖当前钟点。
     state.set_meta(SIGNIN_TARGET, now.isoformat(timespec="seconds"))
+    state.set_meta(SIGNIN_TARGET_WINDOW, window_key())
     return now
 
 
@@ -117,6 +123,7 @@ def test_daily_signin_waits_for_random_target(tmp_path: Path) -> None:
     target = now.replace(hour=10, minute=0, second=0, microsecond=0)
     with StateStore(config.db_path) as state:
         state.set_meta(SIGNIN_TARGET, target.isoformat(timespec="seconds"))
+        state.set_meta(SIGNIN_TARGET_WINDOW, window_key())
         early = attempt_daily_signin(config, client, state, now=now)
         assert early["skipped"] is True
         assert early["pending"] is True
@@ -139,7 +146,50 @@ def test_random_target_is_stable_for_today_and_inside_window(tmp_path: Path) -> 
         parsed = datetime.fromisoformat(first["target"])
         assert parsed.date() == now.date()
         assert 8 <= parsed.hour < 23
-        assert parsed.minute >= 1
+        assert client.calls == 0
+
+
+def test_random_target_respects_custom_window(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.signin_window_start = "10:30"
+    config.signin_window_end = "10:35"
+    config.ensure_data_dir()
+    client = FakeSigninClient()
+    now = local_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    with StateStore(config.db_path) as state:
+        first = attempt_daily_signin(config, client, state, now=now)
+        assert first["skipped"] is True
+        assert first["pending"] is True
+        assert first["window_start"] == "10:30"
+        assert first["window_end"] == "10:35"
+        parsed = datetime.fromisoformat(first["target"])
+        assert "10:30" <= parsed.strftime("%H:%M") < "10:35"
+        status = signin_status(
+            state,
+            enabled=True,
+            window_start="10:30",
+            window_end="10:35",
+            now=now,
+        )
+        assert status["target"] == first["target"]
+        assert client.calls == 0
+
+
+def test_window_change_redraws_same_day_target(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.ensure_data_dir()
+    client = FakeSigninClient()
+    now = local_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    with StateStore(config.db_path) as state:
+        attempt_daily_signin(config, client, state, now=now)
+        config.signin_window_start = "10:00"
+        config.signin_window_end = "11:00"
+        changed = attempt_daily_signin(config, client, state, now=now)
+        assert changed["window_start"] == "10:00"
+        assert changed["window_end"] == "11:00"
+        parsed = datetime.fromisoformat(changed["target"])
+        assert "10:00" <= parsed.strftime("%H:%M") < "11:00"
+        assert state.get_meta(SIGNIN_TARGET_WINDOW) == "10:00-11:00"
         assert client.calls == 0
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -43,6 +44,27 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     if text in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+CLOCK_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def normalize_clock(value: Any, label: str = "时间") -> str:
+    """把 HH:MM 规范成两位小时；非法值抛 ConfigError。"""
+    text = str(value or "").strip()
+    match = CLOCK_RE.fullmatch(text)
+    if match is None:
+        raise ConfigError(f"{label}必须是 HH:MM（00:00–23:59）: {text or '空'}")
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def normalize_signin_window(start: Any, end: Any) -> tuple[str, str]:
+    """校验并返回签到时间范围；必须同一天且开始早于结束。"""
+    start_text = normalize_clock(start, "签到开始时间")
+    end_text = normalize_clock(end, "签到结束时间")
+    if start_text >= end_text:
+        raise ConfigError("签到开始时间必须早于结束时间")
+    return start_text, end_text
 
 
 def _as_list(value: Any) -> list[str]:
@@ -93,6 +115,8 @@ class Config:
     move_target: Path | None = None
     check_missing: bool = True
     daily_signin: bool = False
+    signin_window_start: str = "08:00"
+    signin_window_end: str = "23:00"
     notify_on: str = "always"
     notify_empty: bool = False
     notify_channels: tuple[dict[str, Any], ...] = ()
@@ -162,6 +186,8 @@ class Config:
             "move_target": str(self.move_target) if self.move_target else None,
             "check_missing": self.check_missing,
             "daily_signin": self.daily_signin,
+            "signin_window_start": self.signin_window_start,
+            "signin_window_end": self.signin_window_end,
             "notify_on": self.notify_on,
             "notify_empty": self.notify_empty,
             "notify_channels": mask_channels(self.notify_channels),
@@ -227,6 +253,9 @@ class Config:
             values["check_missing"] = parse_bool(raw["check_missing"], True)
         if "daily_signin" in raw:
             values["daily_signin"] = parse_bool(raw["daily_signin"], False)
+        for key in ("signin_window_start", "signin_window_end"):
+            if key in raw and raw[key] is not None:
+                values[key] = str(raw[key]).strip()
         if "notify_on" in raw:
             values["notify_on"] = str(raw["notify_on"]).strip().lower()
         if "notify_empty" in raw:
@@ -355,6 +384,13 @@ class Config:
         daily_signin = text("NCM_CLOUD_SYNC_DAILY_SIGNIN")
         if daily_signin is not None:
             values["daily_signin"] = parse_bool(daily_signin, False)
+        for name, key in (
+            ("NCM_CLOUD_SYNC_SIGNIN_WINDOW_START", "signin_window_start"),
+            ("NCM_CLOUD_SYNC_SIGNIN_WINDOW_END", "signin_window_end"),
+        ):
+            value = text(name)
+            if value:
+                values[key] = value
         notify_on = text("NCM_CLOUD_SYNC_NOTIFY_ON")
         if notify_on:
             values["notify_on"] = notify_on.lower()
@@ -390,6 +426,9 @@ class Config:
             raise ConfigError("rate_limit 不能为负数")
         if self.retries < 0:
             raise ConfigError("retries 不能为负数")
+        self.signin_window_start, self.signin_window_end = normalize_signin_window(
+            self.signin_window_start, self.signin_window_end
+        )
         if self.post_sync_action not in {"none", "delete", "move"}:
             raise ConfigError("post_sync_action 必须是 none/delete/move")
         if self.post_sync_action == "move":
