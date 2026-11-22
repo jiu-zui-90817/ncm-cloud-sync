@@ -597,10 +597,30 @@ class CloudClient:
             raise AuthError("未登录：MUSIC_U 缺失或已失效，请重新登录")
         return profile
 
-    def daily_signin(self, signin_type: int = 1) -> dict[str, Any]:
-        """每日签到。type=1 为 PC/Web，type=0 为安卓。"""
-        url = f"{BASE_URL}/api/point/dailyTask"
-        body = self._get_json(url, params={"type": int(signin_type)}, check=False)
+    def _today_yunbei(self) -> int:
+        """读取云贝中心今天已到账的云贝；失败不影响签到结果。"""
+        try:
+            body = self._weapi("/weapi/point/today/get", {}, check=False)
+        except Exception:
+            logger.debug("读取今日云贝失败", exc_info=True)
+            return 0
+        if not isinstance(body, dict) or _as_int(body.get("code"), -1) != 200:
+            return 0
+        data = body.get("data")
+        if not isinstance(data, dict):
+            return 0
+        return max(_as_int(data.get("shells"), 0), 0)
+
+    def daily_signin(self) -> dict[str, Any]:
+        """云贝中心每日签到。
+
+        使用 POST /weapi/pointmall/user/sign。旧的
+        /api/point/dailyTask 即使返回成功，也不会出现在手机 App 的
+        云贝收支记录里，已废弃。响应 data.sign 为 true 表示本次签到成功，
+        false 表示今天已经签过。
+        """
+        url = f"{BASE_URL}/weapi/pointmall/user/sign"
+        body = self._weapi("/weapi/pointmall/user/sign", {}, check=False)
         if not isinstance(body, dict):
             raise ApiError("签到接口返回了非 JSON 对象", url=url)
         code = _as_int(body.get("code"), -1)
@@ -608,34 +628,38 @@ class CloudClient:
             raise AuthError("登录状态无效，请重新登录后再签到")
         if code in {405, 429}:
             raise RateLimitError("签到请求过于频繁，请稍后再试", code=code, url=url)
-        data = body.get("data")
-        data = data if isinstance(data, dict) else {}
-        data_code = _as_int(data.get("code"), code) if "code" in data else code
-        if data_code in AUTH_ERROR_CODES:
-            raise AuthError("登录状态无效，请重新登录后再签到")
-        if data_code in {405, 429}:
-            raise RateLimitError("签到请求过于频繁，请稍后再试", code=data_code, url=url)
-        if code == -2 or data_code == -2:
+        if code == -2:
             return {
-                "signin_type": int(signin_type),
                 "already": True,
                 "code": code,
-                "message": str(data.get("message") or body.get("message") or "今天已经签到过了"),
+                "message": str(body.get("message") or "今天已经签到过了"),
                 "points": None,
             }
-        if code not in {200, -1}:
+        if code != 200:
             message = body.get("msg") or body.get("message") or "签到失败"
             raise ApiError(str(message), code=code, url=url)
-        if data_code not in {200, -1}:
-            message = data.get("message") or body.get("message") or "签到失败"
-            raise ApiError(str(message), code=data_code, url=url)
-        raw_points = data.get("point", data.get("points", body.get("point")))
-        points = _as_int(raw_points, 0) if raw_points is not None else 0
+        data = body.get("data")
+        signed: bool | None = None
+        if isinstance(data, bool):
+            signed = data
+        elif isinstance(data, dict) and isinstance(data.get("sign"), bool):
+            signed = data["sign"]
+        if signed is None:
+            message = body.get("message") or "签到接口未返回有效状态"
+            raise ApiError(str(message), code=code, url=url)
+        if not signed:
+            return {
+                "already": True,
+                "code": code,
+                "message": str(body.get("message") or "今天已经签到过了"),
+                "points": None,
+            }
+        points = self._today_yunbei()
+        message = f"签到成功，获得 {points} 云贝" if points else "签到成功"
         return {
-            "signin_type": int(signin_type),
             "already": False,
             "code": code,
-            "message": str(data.get("message") or body.get("message") or "签到成功"),
+            "message": message,
             "points": points or None,
         }
 

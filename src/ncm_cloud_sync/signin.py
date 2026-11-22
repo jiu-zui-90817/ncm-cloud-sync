@@ -1,8 +1,7 @@
-"""网易云每日签到。
+"""网易云云贝中心每日签到。
 
-签到只使用账号已有 Cookie 调用网页端接口，默认关闭。签到失败不会影响同步。
+签到只使用账号已有 Cookie 调用云贝中心接口，默认关闭。签到失败不会影响同步。
 每天在用户设定的本地时间范围内（默认 08:00–23:00）随机选择一个时刻，避免固定时间请求。
-可选同时调用手机端（type=0）任务；两端独立发奖，同一天同一端重复请求会返回已签到。
 """
 
 from __future__ import annotations
@@ -113,19 +112,6 @@ def _as_points(value: Any) -> int | None:
     return points if points > 0 else None
 
 
-def _detail_message(details: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for item in details:
-        label = str(item.get("label") or "签到")
-        message = str(item.get("message") or "")
-        points = _as_points(item.get("points"))
-        text = f"{label}：{message}" if message else label
-        if points:
-            text += f" +{points}"
-        parts.append(text)
-    return "；".join(parts)
-
-
 def signin_status(
     state: StateStore | None = None,
     *,
@@ -192,14 +178,12 @@ def _record(
     state.set_meta(SIGNIN_DETAILS, json.dumps(details, ensure_ascii=False))
 
 
-def _signin_one(client: Any, signin_type: int, label: str) -> dict[str, Any]:
+def _signin_one(client: Any) -> dict[str, Any]:
     try:
-        result = client.daily_signin(signin_type)
+        result = client.daily_signin()
     except Exception as exc:
         return {
-            "platform": "mobile" if signin_type == 0 else "desktop",
-            "label": label,
-            "signin_type": signin_type,
+            "label": "云贝中心",
             "status": "failed",
             "message": str(exc),
             "points": None,
@@ -211,9 +195,7 @@ def _signin_one(client: Any, signin_type: int, label: str) -> dict[str, Any]:
         or ("今天已经签到过了" if already else "签到成功")
     )
     return {
-        "platform": "mobile" if signin_type == 0 else "desktop",
-        "label": label,
-        "signin_type": signin_type,
+        "label": "云贝中心",
         "status": status,
         "already": already,
         "message": message,
@@ -246,7 +228,7 @@ def _attempt_locked(
     current = status_snapshot()
     if current["today"] and current["status"] in {"success", "already"}:
         return {**current, "skipped": True, "pending": False}
-    if current["today"] and current["status"] in {"failed", "partial"} and not manual:
+    if current["today"] and current["status"] == "failed" and not manual:
         return {**current, "skipped": True, "pending": False}
     if not manual:
         target = _target_for_today(state, now, window_start, window_end)
@@ -259,36 +241,20 @@ def _attempt_locked(
                 "target": target.isoformat(timespec="seconds"),
             }
 
-    targets = [(1, "桌面端")]
-    if config.signin_mobile:
-        targets.append((0, "手机端"))
-    details = [_signin_one(client, signin_type, label) for signin_type, label in targets]
-    successes = [item for item in details if item["status"] in {"success", "already"}]
-    failures = [item for item in details if item["status"] == "failed"]
-    if not failures:
-        status = "already" if all(item["status"] == "already" for item in details) else "success"
-    elif not successes:
-        status = "failed"
-    else:
-        status = "partial"
-    points = sum(
-        int(item["points"])
-        for item in details
-        if _as_points(item.get("points")) is not None
-    )
-    message = _detail_message(details)
+    detail = _signin_one(client)
+    status = str(detail["status"])
+    points = int(detail["points"]) if _as_points(detail.get("points")) is not None else 0
+    message = str(detail["message"])
     _record(
         state,
         date=today,
         status=status,
         message=message,
         points=points or None,
-        details=details,
+        details=[detail],
     )
     if status == "failed":
         logger.warning("每日签到失败：%s", message)
-    elif status == "partial":
-        logger.warning("每日签到部分成功：%s", message)
     elif status == "already":
         logger.info("每日签到：%s", message)
     else:
@@ -309,9 +275,9 @@ def attempt_daily_signin(
 ) -> dict[str, Any]:
     """执行一次签到。
 
-    自动模式每天最多尝试一次（失败或部分成功也等第二天），并且要等到当天随机时刻；
-    手动模式忽略随机时刻，允许在当天失败/部分成功后重试，但已经签到成功时不会重复请求。
-    默认先签桌面端（type=1），开启 signin_mobile 后再签手机端（type=0）。
+    自动模式每天最多尝试一次（失败也等第二天），并且要等到当天随机时刻；
+    手动模式忽略随机时刻，允许在当天失败后重试，但已经签到成功时不会重复请求。
+    只调用云贝中心签到接口一次，不再区分桌面端/手机端。
     """
     if not config.daily_signin:
         raise ConfigError("请先启用每日签到并保存设置")

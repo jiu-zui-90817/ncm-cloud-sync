@@ -21,8 +21,6 @@ class FakeSigninClient:
         self,
         result=None,
         error: Exception | None = None,
-        results: dict[int, dict] | None = None,
-        errors: dict[int, Exception] | None = None,
     ) -> None:
         self.result = result or {
             "already": False,
@@ -30,22 +28,17 @@ class FakeSigninClient:
             "points": 2,
         }
         self.error = error
-        self.results = results or {}
-        self.errors = errors or {}
         self.calls = 0
-        self.types: list[int] = []
 
-    def daily_signin(self, signin_type: int = 1):
+    def daily_signin(self):
         self.calls += 1
-        self.types.append(signin_type)
-        error = self.errors.get(signin_type, self.error)
-        if error is not None:
-            raise error
-        return dict(self.results.get(signin_type, self.result))
+        if self.error is not None:
+            raise self.error
+        return dict(self.result)
 
 
 def make_config(tmp_path: Path) -> Config:
-    return Config(data_dir=tmp_path / "data", daily_signin=True, signin_mobile=False)
+    return Config(data_dir=tmp_path / "data", daily_signin=True)
 
 
 def local_now() -> datetime:
@@ -227,57 +220,17 @@ def test_daily_signin_disabled_raises(tmp_path: Path) -> None:
         assert signin_status(state)["status"] == ""
 
 
-def test_dual_signin_signs_desktop_then_mobile_and_sums_points(
-    tmp_path: Path,
-) -> None:
+def test_signin_records_cloud_shell_detail(tmp_path: Path) -> None:
     config = make_config(tmp_path)
-    config.signin_mobile = True
     config.ensure_data_dir()
     client = FakeSigninClient(
-        results={
-            1: {"already": False, "message": "桌面端签到成功", "points": 2},
-            0: {"already": False, "message": "手机端签到成功", "points": 50},
-        }
+        result={"already": False, "message": "签到成功，获得 50 云贝", "points": 50}
     )
-    with StateStore(config.db_path) as state:
-        now = make_due(state)
-        result = attempt_daily_signin(config, client, state, now=now)
-        assert client.types == [1, 0]
-        assert result["status"] == "success"
-        assert result["points"] == 52
-        assert [item["label"] for item in result["details"]] == ["桌面端", "手机端"]
-        assert [item["status"] for item in result["details"]] == ["success", "success"]
-        assert "桌面端" in result["message"] and "手机端" in result["message"]
-
-
-def test_dual_signin_partial_when_mobile_fails(tmp_path: Path) -> None:
-    config = make_config(tmp_path)
-    config.signin_mobile = True
-    config.ensure_data_dir()
-    client = FakeSigninClient(
-        result={"already": False, "message": "桌面端签到成功", "points": 2},
-        errors={0: ApiError("手机端风控", code=-462)},
-    )
-    with StateStore(config.db_path) as state:
-        now = make_due(state)
-        first = attempt_daily_signin(config, client, state, now=now)
-        assert first["status"] == "partial"
-        assert first["points"] == 2
-        assert [item["status"] for item in first["details"]] == ["success", "failed"]
-        auto_retry = attempt_daily_signin(config, client, state, now=now)
-        assert auto_retry["skipped"] is True
-        client.errors.clear()
-        client.results[0] = {"already": False, "message": "手机端签到成功", "points": 50}
-        manual = attempt_daily_signin(config, client, state, now=now, manual=True)
-        assert manual["status"] == "success"
-        assert manual["points"] == 52
-
-
-def test_mobile_signin_can_be_disabled(tmp_path: Path) -> None:
-    config = make_config(tmp_path)
-    config.ensure_data_dir()
-    client = FakeSigninClient()
     with StateStore(config.db_path) as state:
         result = attempt_daily_signin(config, client, state, now=make_due(state))
         assert result["status"] == "success"
-        assert client.types == [1]
+        assert result["points"] == 50
+        assert client.calls == 1
+        assert [item["label"] for item in result["details"]] == ["云贝中心"]
+        assert [item["status"] for item in result["details"]] == ["success"]
+        assert "50 云贝" in result["message"]

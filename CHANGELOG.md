@@ -2,6 +2,13 @@
 
 只记录用户可感知的变化。接口与兼容细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)，更早版本见 GitHub Releases。
 
+## 0.3.25
+
+- 修复签到显示成功但网易云 App 云贝中心没有记录：改用云贝中心接口 `POST /weapi/pointmall/user/sign`；旧的 `/api/point/dailyTask` 即使返回 200 也不会产生云贝记录。
+- 移除无效的“同时签桌面端和手机端”选项与 `signin_mobile` 配置；旧配置里的该键会被忽略，不影响启动。
+- 签到成功后读取 `/weapi/point/today/get` 的 `data.shells` 显示今日到账云贝；`data.sign=false` 视为已签到，`code=-1` 或缺少 `data.sign` 不再当作成功。
+- 连续签到奖励不自动领取，仍需要在网易云 App 云贝中心手动领取。
+
 ## 0.3.24
 
 - 每日签到支持同时签手机端：默认先签桌面端（`type=1`），再签手机端（`type=0`）；可在设置里关闭“同时签到手机端”。

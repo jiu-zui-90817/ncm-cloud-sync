@@ -740,50 +740,56 @@ def test_post_json_throttles_requests(monkeypatch) -> None:
     assert all(seconds > 0 for seconds in sleeps)
 
 
-def test_daily_signin_parses_success(monkeypatch: Any) -> None:
+def test_daily_signin_uses_cloud_shell_endpoint(monkeypatch: Any) -> None:
     client = make_client()
     calls: list[tuple[str, dict[str, Any] | None, bool]] = []
 
-    def fake_get(url: str, params=None, *, check=True):
-        calls.append((url, params, check))
-        return {"code": 200, "data": {"code": 200, "message": "签到成功", "point": 2}}
+    def fake_weapi(path: str, payload=None, *, check=True):
+        calls.append((path, payload, check))
+        if path.endswith("/point/today/get"):
+            return {"code": 200, "data": {"shells": 50}}
+        return {"code": 200, "data": {"sign": True}}
 
-    monkeypatch.setattr(client, "_get_json", fake_get)
+    monkeypatch.setattr(client, "_weapi", fake_weapi)
     result = client.daily_signin()
     assert result["already"] is False
-    assert result["points"] == 2
-    assert result["message"] == "签到成功"
-    assert calls == [(f"{client_module.BASE_URL}/api/point/dailyTask", {"type": 1}, False)]
-
-
-def test_daily_signin_mobile_uses_type_zero(monkeypatch: Any) -> None:
-    client = make_client()
-    calls: list[dict[str, Any] | None] = []
-
-    def fake_get(url: str, params=None, *, check=True):
-        calls.append(params)
-        return {"code": 200, "data": {"code": 200, "message": "签到成功", "point": 50}}
-
-    monkeypatch.setattr(client, "_get_json", fake_get)
-    result = client.daily_signin(0)
     assert result["points"] == 50
-    assert calls == [{"type": 0}]
+    assert "50" in result["message"]
+    assert calls == [
+        ("/weapi/pointmall/user/sign", {}, False),
+        ("/weapi/point/today/get", {}, False),
+    ]
 
 
 def test_daily_signin_already_signed(monkeypatch: Any) -> None:
     client = make_client()
     monkeypatch.setattr(
         client,
-        "_get_json",
-        lambda *args, **kwargs: {"code": -2, "message": "今天已经签到过了"},
+        "_weapi",
+        lambda *args, **kwargs: {
+            "code": 200,
+            "data": {"sign": False},
+            "message": "今天已经签到过了",
+        },
     )
     result = client.daily_signin()
     assert result["already"] is True
     assert result["points"] is None
 
 
+def test_daily_signin_rejects_legacy_minus_one(monkeypatch: Any) -> None:
+    client = make_client()
+    monkeypatch.setattr(
+        client,
+        "_weapi",
+        lambda *args, **kwargs: {"code": -1, "message": "功能暂不支持"},
+    )
+    with pytest.raises(ApiError, match="功能暂不支持"):
+        client.daily_signin()
+
+
 def test_daily_signin_maps_auth_code(monkeypatch: Any) -> None:
     client = make_client()
-    monkeypatch.setattr(client, "_get_json", lambda *args, **kwargs: {"code": 301})
+    monkeypatch.setattr(client, "_weapi", lambda *args, **kwargs: {"code": 301})
     with pytest.raises(AuthError, match="登录"):
         client.daily_signin()
