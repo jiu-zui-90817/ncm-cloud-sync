@@ -27,6 +27,8 @@ SIGNIN_AT = "signin_at"
 SIGNIN_TARGET = "signin_target"
 SIGNIN_TARGET_WINDOW = "signin_target_window"
 SIGNIN_DETAILS = "signin_details"
+SIGNIN_BACKEND = "signin_backend"
+SIGNIN_BACKEND_CLOUD_SHELL = "cloud_shell"
 
 DEFAULT_SIGNIN_WINDOW_START = "08:00"
 DEFAULT_SIGNIN_WINDOW_END = "23:00"
@@ -138,6 +140,19 @@ def signin_status(
         points = _as_points(state.get_meta(SIGNIN_POINTS, "") or "")
         at = state.get_meta(SIGNIN_AT, "") or ""
         details = _parse_details(state.get_meta(SIGNIN_DETAILS, "") or "")
+        backend = state.get_meta(SIGNIN_BACKEND, "") or ""
+        # 0.3.24 及更早版本用旧接口记录过“签到成功”，但云贝中心没有记录。
+        # 升级后首次遇到这类旧状态时按未签到处理，允许重新签一次。
+        if (
+            date == now.date().isoformat()
+            and status in {"success", "already"}
+            and backend != SIGNIN_BACKEND_CLOUD_SHELL
+        ):
+            status = ""
+            message = ""
+            points = None
+            at = ""
+            details = []
         raw_target = state.get_meta(SIGNIN_TARGET, "") or ""
         parsed_target = _parse_datetime(raw_target)
         if (
@@ -176,6 +191,7 @@ def _record(
     state.set_meta(SIGNIN_POINTS, str(points or ""))
     state.set_meta(SIGNIN_AT, _utc_now())
     state.set_meta(SIGNIN_DETAILS, json.dumps(details, ensure_ascii=False))
+    state.set_meta(SIGNIN_BACKEND, SIGNIN_BACKEND_CLOUD_SHELL)
 
 
 def _signin_one(client: Any) -> dict[str, Any]:

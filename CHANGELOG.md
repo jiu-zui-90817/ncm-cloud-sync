@@ -2,6 +2,11 @@
 
 只记录用户可感知的变化。接口与兼容细节见 [docs/PROTOCOL.md](docs/PROTOCOL.md)，更早版本见 GitHub Releases。
 
+## 0.3.26
+
+- 升级后自动重置旧版（0.3.24 及更早）当天记录的“签到成功/已签到”状态：这些记录来自旧接口，云贝中心没有对应记录。重置后手动签到可以立即用新接口重签一次，不会等到第二天。
+- 新接口签到成功会写入 `signin_backend=cloud_shell`，之后正常去重；旧状态只影响升级当天。
+
 ## 0.3.25
 
 - 修复签到显示成功但网易云 App 云贝中心没有记录：改用云贝中心接口 `POST /weapi/pointmall/user/sign`；旧的 `/api/point/dailyTask` 即使返回 200 也不会产生云贝记录。

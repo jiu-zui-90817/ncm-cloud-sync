@@ -8,6 +8,12 @@ import pytest
 from ncm_cloud_sync.config import Config
 from ncm_cloud_sync.errors import ApiError, ConfigError
 from ncm_cloud_sync.signin import (
+    SIGNIN_AT,
+    SIGNIN_DATE,
+    SIGNIN_DETAILS,
+    SIGNIN_MESSAGE,
+    SIGNIN_POINTS,
+    SIGNIN_STATUS,
     SIGNIN_TARGET,
     SIGNIN_TARGET_WINDOW,
     attempt_daily_signin,
@@ -72,6 +78,30 @@ def test_daily_signin_succeeds_and_skips_second_attempt(tmp_path: Path) -> None:
         assert second["skipped"] is True
         third = attempt_daily_signin(config, client, state, now=now, manual=True)
         assert third["skipped"] is True
+        assert client.calls == 1
+
+
+def test_legacy_success_is_rechecked_after_upgrade(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.ensure_data_dir()
+    client = FakeSigninClient()
+    with StateStore(config.db_path) as state:
+        now = make_due(state)
+        state.set_meta(SIGNIN_DATE, now.date().isoformat())
+        state.set_meta(SIGNIN_STATUS, "success")
+        state.set_meta(SIGNIN_MESSAGE, "桌面端：签到成功")
+        state.set_meta(SIGNIN_POINTS, "2")
+        state.set_meta(SIGNIN_AT, "2026-01-01T00:00:00+00:00")
+        state.set_meta(
+            SIGNIN_DETAILS,
+            '[{"label": "桌面端", "status": "success", "points": 2}]',
+        )
+        before = signin_status(state, enabled=True, now=now)
+        assert before["status"] == ""
+        result = attempt_daily_signin(config, client, state, manual=True, now=now)
+        assert result["status"] == "success"
+        assert result["points"] == 2
+        assert result["skipped"] is False
         assert client.calls == 1
 
 
