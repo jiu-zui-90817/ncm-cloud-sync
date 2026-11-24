@@ -108,6 +108,7 @@ def test_status_shape_and_static(tmp_path: Path) -> None:
     assert data["settings"]["post_sync_action"] == "none"
     assert data["settings"]["move_target"] == ""
     assert data["settings"]["check_missing"] is True
+    assert data["settings"]["metadata_fill"] is True
     assert data["settings"]["daily_signin"] is False
     assert data["settings"]["signin_window_start"] == "08:00"
     assert data["settings"]["signin_window_end"] == "23:00"
@@ -183,6 +184,7 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
             "exclude_dirs": [str(excluded)],
             "interval": 300,
             "rate_limit": 2.5,
+            "metadata_fill": False,
             "signin_window_start": "09:30",
             "signin_window_end": "21:15",
             "log_level": "DEBUG",
@@ -198,6 +200,8 @@ def test_settings_save_updates_config(tmp_path: Path) -> None:
     assert saved["music_dirs"] == [str(music)]
     assert saved["exclude_dirs"] == [str(excluded.resolve())]
     assert saved["rate_limit"] == 2.5
+    assert saved["metadata_fill"] is False
+    assert app.config.metadata_fill is False
     assert saved["signin_window_start"] == "09:30"
     assert saved["signin_window_end"] == "21:15"
     assert app.config.signin_window_start == "09:30"
@@ -1012,11 +1016,14 @@ def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
     assert 'id="headerSignin"' in html
     assert 'id="signinWindowStart"' in html
     assert 'id="signinWindowEnd"' in html
+    assert 'id="metadataFill"' in html
     assert 'id="signinNow"' not in html
 
     status, _, script = call(app, "/app.js")
     assert status == "200 OK"
     assert 'el("dailySignin").checked = settings.daily_signin === true;' in script
+    assert 'el("metadataFill").checked = settings.metadata_fill !== false;' in script
+    assert 'metadata_fill: el("metadataFill").checked,' in script
     assert 'el("signinWindowStart").value = settings.signin_window_start || "08:00";' in script
     assert 'signin_window_start: el("signinWindowStart").value || "08:00",' in script
     assert "function signinDetailText(details)" in script

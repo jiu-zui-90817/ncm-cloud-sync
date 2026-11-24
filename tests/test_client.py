@@ -793,3 +793,55 @@ def test_daily_signin_maps_auth_code(monkeypatch: Any) -> None:
     monkeypatch.setattr(client, "_weapi", lambda *args, **kwargs: {"code": 301})
     with pytest.raises(AuthError, match="登录"):
         client.daily_signin()
+
+
+def test_search_songs_parses_cloudsearch_result() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
+        return {
+            "code": 200,
+            "result": {
+                "songs": [
+                    {
+                        "id": 186016,
+                        "name": "晴天",
+                        "ar": [{"name": "周杰伦"}],
+                        "al": {"name": "叶惠美"},
+                    }
+                ]
+            },
+        }
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    songs = client.search_songs("晴天 周杰伦", limit=5)
+
+    assert calls[0][0] == "/weapi/cloudsearch/pc"
+    assert calls[0][1] == {
+        "s": "晴天 周杰伦",
+        "type": 1,
+        "limit": 5,
+        "offset": 0,
+        "total": True,
+    }
+    assert calls[0][2] == {"check": False}
+    assert songs == [
+        {"id": 186016, "title": "晴天", "artist": "周杰伦", "album": "叶惠美"}
+    ]
+
+
+def test_search_songs_rejects_error_code_and_empty_query() -> None:
+    client = make_client()
+    calls: list[tuple] = []
+
+    def fake_weapi(path, payload=None, **kwargs):
+        calls.append((path, payload, kwargs))
+        return {"code": 400, "msg": "参数错误"}
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    with pytest.raises(ApiError, match="参数错误"):
+        client.search_songs("晴天")
+    assert client.search_songs("   ") == []
+    assert len(calls) == 1

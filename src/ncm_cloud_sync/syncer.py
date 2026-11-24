@@ -14,6 +14,8 @@ from .client import CloudClient, UploadResult
 from .config import Config
 from .errors import AuthError, NcmSyncError, NosUnavailableError, RateLimitError
 from .hashing import file_md5
+from .metadata import find_lyric_sidecar, lyric_target
+from .metadata_fill import fill_metadata
 from .scanner import AudioFile, path_is_excluded, scan_with_report
 from .signin import maybe_daily_signin
 from .state import StateStore
@@ -63,6 +65,7 @@ class SyncStats:
     deleted: int = 0
     moved_after_sync: int = 0
     post_action_failed: int = 0
+    metadata_filled: int = 0
     bytes_uploaded: int = 0
     capacity_total: int = 0
     capacity_used: int = 0
@@ -146,6 +149,7 @@ class SyncStats:
                 if self.post_action_failed
                 else ""
             )
+            + (f"，补全元信息 {self.metadata_filled} 首" if self.metadata_filled else "")
             + f"，上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
             + (
@@ -543,6 +547,34 @@ class Syncer:
         logger.info("同步完成: %s", stats.summary())
         return stats
 
+    def _fill_metadata(self, audio: AudioFile, stats: SyncStats) -> AudioFile:
+        """上传前补全缺失标签；失败只影响补全，不阻断上传。"""
+        if not self.config.metadata_fill:
+            return audio
+        try:
+            result = fill_metadata(audio.path, self.client)
+        except Exception as exc:
+            logger.warning("补全元信息失败，继续上传: %s（%s）", audio.path, exc)
+            return audio
+        if not result.filled:
+            return audio
+        changed = audio.path.stat()
+        updated = AudioFile(audio.path, changed.st_size, changed.st_mtime_ns)
+        stats.metadata_filled += 1
+        detail = "补全：" + "、".join(
+            f"{key}={value}" for key, value in result.fields.items()
+        )
+        self.state.mark_seen(updated.path, updated.size, updated.mtime_ns)
+        self._record(
+            "metadata_filled",
+            path=updated.path,
+            name=updated.path.name,
+            size=updated.size,
+            detail=detail,
+        )
+        logger.info("已补全元信息: %s（%s）", updated.path, detail)
+        return updated
+
     def _process(self, audio: AudioFile, stats: SyncStats) -> None:
         record = self.state.get(audio.path)
         record_md5 = str(record.md5 or "").lower() if record is not None else ""
@@ -652,6 +684,12 @@ class Syncer:
                 {"path": str(audio.path), "song_id": cloud_song_id},
             )
             return
+
+        filled = self._fill_metadata(audio, stats)
+        if filled is not audio:
+            audio = filled
+            md5 = file_md5(audio.path)
+            self.state.set_md5(audio.path, md5)
 
         free = self._free_capacity(stats)
         if free is not None and audio.size > free:
@@ -766,37 +804,83 @@ class Syncer:
         if current.st_size != audio.size or current.st_mtime_ns != audio.mtime_ns:
             logger.info("同步后处理已跳过：文件在扫描后发生变化: %s", path)
             return
+        lyric = find_lyric_sidecar(path)
         try:
             if action == "delete":
+                # 先删歌词；歌词删不掉时保留音频，避免只删掉一半。
+                if lyric is not None:
+                    lyric.unlink()
                 path.unlink()
                 stats.deleted += 1
                 self.state.mark_deleted(path)
+                detail = "已确认在云端，删除本地文件"
+                if lyric is not None:
+                    detail += "（含歌词）"
                 self._record(
                     "deleted",
                     path=path,
                     name=path.name,
                     size=audio.size,
-                    detail="已确认在云端，删除本地文件",
+                    detail=detail,
                 )
-                logger.info("已确认在云端，删除本地文件: %s", path)
-                self._notify("deleted", {"path": str(path), "size": audio.size})
+                logger.info(
+                    "已确认在云端，删除本地文件: %s%s",
+                    path,
+                    f"（含歌词 {lyric.name}）" if lyric is not None else "",
+                )
+                self._notify(
+                    "deleted",
+                    {
+                        "path": str(path),
+                        "size": audio.size,
+                        "lyric": str(lyric) if lyric is not None else None,
+                    },
+                )
             else:
-                target = self._move_target_for(path)
+                target = self._move_target_for(path, lyric=lyric)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(path), str(target))
+                lyric_destination: Path | None = None
+                if lyric is not None:
+                    lyric_destination = lyric_target(target, lyric)
+                    # 先移动歌词；失败时音频还在原处，便于下次重试。
+                    shutil.move(str(lyric), str(lyric_destination))
+                try:
+                    shutil.move(str(path), str(target))
+                except Exception:
+                    if lyric_destination is not None and lyric_destination.exists():
+                        try:
+                            shutil.move(str(lyric_destination), str(lyric))
+                        except OSError:
+                            logger.warning("移动歌词失败，无法回滚: %s", lyric, exc_info=True)
+                    raise
                 stats.moved_after_sync += 1
                 self.state.mark_archived(path, target)
+                detail = f"已确认在云端，移动到 {target}"
+                if lyric is not None:
+                    detail += "（含歌词）"
                 self._record(
                     "moved_after_sync",
                     path=path,
                     name=path.name,
                     size=audio.size,
-                    detail=f"已确认在云端，移动到 {target}",
+                    detail=detail,
                 )
-                logger.info("已确认在云端，移动本地文件: %s -> %s", path, target)
+                logger.info(
+                    "已确认在云端，移动本地文件: %s -> %s%s",
+                    path,
+                    target,
+                    f"（含歌词 -> {lyric_destination.name}）"
+                    if lyric_destination is not None
+                    else "",
+                )
                 self._notify(
                     "moved_after_sync",
-                    {"path": str(path), "target": str(target), "size": audio.size},
+                    {
+                        "path": str(path),
+                        "target": str(target),
+                        "size": audio.size,
+                        "lyric": str(lyric_destination) if lyric_destination is not None else None,
+                    },
                 )
         except Exception as exc:
             self._post_action_failed(path, action, exc, stats, audio.size)
@@ -820,7 +904,7 @@ class Syncer:
         )
         logger.warning("%s: %s", detail, path)
 
-    def _move_target_for(self, path: Path) -> Path:
+    def _move_target_for(self, path: Path, *, lyric: Path | None = None) -> Path:
         if self.config.move_target is None:
             raise OSError("未配置同步后移动目录")
         target_dir = Path(self.config.move_target)
@@ -828,12 +912,21 @@ class Syncer:
             raise OSError("同步后移动目录必须是绝对路径")
         if any(target_dir == root for root in self.config.music_dirs):
             raise OSError("同步后移动目录不能是音乐根目录")
+        if lyric is None:
+            lyric = find_lyric_sidecar(path)
+
+        def available(candidate: Path) -> bool:
+            if candidate.exists():
+                return False
+            # 音频目标可用，但同名歌词已存在时也要换编号，避免覆盖已有歌词。
+            return lyric is None or not lyric_target(candidate, lyric).exists()
+
         candidate = target_dir / path.name
-        if not candidate.exists():
+        if available(candidate):
             return candidate
         for index in range(1, 10000):
             candidate = target_dir / f"{path.stem} ({index}){path.suffix}"
-            if not candidate.exists():
+            if available(candidate):
                 return candidate
         raise OSError(f"移动目录中同名文件过多: {path.name}")
 

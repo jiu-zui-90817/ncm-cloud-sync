@@ -11,6 +11,7 @@ import pytest
 from ncm_cloud_sync.client import UploadResult
 from ncm_cloud_sync.config import Config
 from ncm_cloud_sync.errors import NosUnavailableError, RateLimitError, UploadError
+from ncm_cloud_sync.metadata import read_tags
 from ncm_cloud_sync.signin import SIGNIN_TARGET, SIGNIN_TARGET_WINDOW
 from ncm_cloud_sync.state import StateStore
 from ncm_cloud_sync.syncer import Syncer
@@ -25,6 +26,7 @@ class FakeClient:
         preflight_error=None,
         cloud_error=None,
         capacity=None,
+        search=None,
     ) -> None:
         self.outcomes = outcomes or {}
         self.cloud = cloud or {}
@@ -34,6 +36,12 @@ class FakeClient:
         self.last_cloud_capacity = capacity or {}
         self.calls: list[str] = []
         self.signin_calls = 0
+        self.search = search or []
+        self.search_queries: list[str] = []
+
+    def search_songs(self, keyword: str, limit: int = 10) -> list[dict]:
+        self.search_queries.append(keyword)
+        return list(self.search)
 
     def daily_signin(self):
         self.signin_calls += 1
@@ -586,6 +594,86 @@ def test_post_sync_move_archives_local_file(tmp_path: Path) -> None:
         assert str(archive / "a.mp3") in (record.last_error or "")
 
 
+def test_post_sync_delete_removes_lyric_sidecar(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    lyric = music / "a.LRC"
+    lyric.write_text("[00:00.00]test", encoding="utf-8")
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "delete"
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.deleted == 1
+        assert not target.exists()
+        assert not lyric.exists()
+
+
+def test_post_sync_move_moves_lyric_sidecar(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = tmp_path / "archive"
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    lyric = music / "a.lrc"
+    lyric.write_text("[00:00.00]test", encoding="utf-8")
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "move"
+    config.move_target = archive
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.moved_after_sync == 1
+        assert (archive / "a.mp3").exists()
+        assert (archive / "a.lrc").read_text(encoding="utf-8") == "[00:00.00]test"
+        assert not target.exists()
+        assert not lyric.exists()
+
+
+def test_post_sync_move_renames_lyric_with_numbered_audio(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "a.mp3").write_bytes(b"old")
+    (archive / "a.lrc").write_text("old lyric", encoding="utf-8")
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    lyric = music / "a.lrc"
+    lyric.write_text("new lyric", encoding="utf-8")
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "move"
+    config.move_target = archive
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.moved_after_sync == 1
+        assert (archive / "a.mp3").read_bytes() == b"old"
+        assert (archive / "a.lrc").read_text(encoding="utf-8") == "old lyric"
+        assert (archive / "a (1).mp3").read_bytes() == b"a" * 100
+        assert (archive / "a (1).lrc").read_text(encoding="utf-8") == "new lyric"
+
+
+def test_post_sync_move_avoids_existing_lyric_only_collision(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "a.lrc").write_text("old lyric", encoding="utf-8")
+    target = music / "a.mp3"
+    target.write_bytes(b"a" * 100)
+    lyric = music / "a.lrc"
+    lyric.write_text("new lyric", encoding="utf-8")
+    config = make_config(tmp_path, music)
+    config.post_sync_action = "move"
+    config.move_target = archive
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, FakeClient(), state).run_once()
+        assert stats.moved_after_sync == 1
+        assert (archive / "a.lrc").read_text(encoding="utf-8") == "old lyric"
+        assert (archive / "a (1).mp3").exists()
+        assert (archive / "a (1).lrc").read_text(encoding="utf-8") == "new lyric"
+
+
 def test_post_sync_delete_keeps_already_uploaded_file(tmp_path: Path) -> None:
     music = tmp_path / "music"
     music.mkdir()
@@ -725,3 +813,30 @@ def test_missing_check_can_be_disabled(tmp_path: Path) -> None:
         assert stats.missing == 0
         record = state.get(target)
         assert record is not None and record.status == "uploaded"
+
+
+def make_mp3(path: Path) -> Path:
+    frame = b"\xff\xfb\x90\x00" + b"\x00" * 413
+    path.write_bytes(frame * 8)
+    return path
+
+
+def test_upload_fills_missing_metadata_before_upload(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    path = make_mp3(music / "01. 周杰伦 - 晴天 [320k].mp3")
+    config = make_config(tmp_path, music)
+    client = FakeClient(
+        search=[{"id": 1, "title": "晴天", "artist": "周杰伦", "album": "叶惠美"}]
+    )
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+
+    assert stats.uploaded == 1
+    assert stats.metadata_filled == 1
+    assert client.search_queries == ["晴天 周杰伦"]
+    assert read_tags(path) == {
+        "title": "晴天",
+        "artist": "周杰伦",
+        "album": "叶惠美",
+    }

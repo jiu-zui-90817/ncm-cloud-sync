@@ -342,6 +342,66 @@ class CloudClient:
             if key and value:
                 self.cookies[key] = value
 
+    def search_songs(self, keyword: str, limit: int = 10) -> list[dict[str, Any]]:
+        """按关键词搜索网易云歌曲，返回补全元信息所需的精简字段。"""
+        query = str(keyword or "").strip()
+        if not query:
+            return []
+        body = self._weapi(
+            "/weapi/cloudsearch/pc",
+            {
+                "s": query,
+                "type": 1,
+                "limit": max(1, min(int(limit), 30)),
+                "offset": 0,
+                "total": True,
+            },
+            check=False,
+        )
+        code = _as_int(body.get("code"), -1)
+        if code in AUTH_ERROR_CODES:
+            raise AuthError("登录状态无效，请重新登录或更新 MUSIC_U")
+        if code in {405, 429}:
+            raise RateLimitError(
+                str(body.get("msg") or body.get("message") or "搜索过于频繁"),
+                code=code,
+            )
+        if code != 200:
+            raise ApiError(
+                str(body.get("msg") or body.get("message") or "搜索失败"),
+                code=code,
+            )
+        result = body.get("result")
+        songs = result.get("songs") if isinstance(result, dict) else None
+        if not isinstance(songs, list):
+            return []
+        parsed: list[dict[str, Any]] = []
+        for song in songs:
+            if not isinstance(song, dict):
+                continue
+            artists = song.get("ar") or song.get("artists") or []
+            if isinstance(artists, dict):
+                artists = [artists]
+            artist_names = [
+                str(item.get("name") or "").strip()
+                for item in artists
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
+            ]
+            album = song.get("al") or song.get("album") or {}
+            album_name = str(album.get("name") or "").strip() if isinstance(album, dict) else ""
+            title = str(song.get("name") or "").strip()
+            if not title:
+                continue
+            parsed.append(
+                {
+                    "id": _as_int(song.get("id"), 0),
+                    "title": title,
+                    "artist": "/".join(artist_names),
+                    "album": album_name,
+                }
+            )
+        return parsed
+
     def _weapi(
         self,
         path: str,

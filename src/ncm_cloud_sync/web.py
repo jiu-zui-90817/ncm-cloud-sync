@@ -63,6 +63,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "post_sync_action": "none",
     "move_target": "",
     "check_missing": True,
+    "metadata_fill": True,
     "daily_signin": False,
     "signin_window_start": "08:00",
     "signin_window_end": "23:00",
@@ -286,6 +287,7 @@ class SettingsStore:
             data["check_missing"] = _as_bool(raw.get("check_missing"), True)
         else:
             data["check_missing"] = action == "none"
+        data["metadata_fill"] = _as_bool(raw.get("metadata_fill"), True)
         data["daily_signin"] = _as_bool(raw.get("daily_signin"), False)
         try:
             data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
@@ -340,6 +342,7 @@ class SettingsStore:
             data["check_missing"] = _as_bool(payload.get("check_missing"), True)
         else:
             data["check_missing"] = action == "none"
+        data["metadata_fill"] = _as_bool(payload.get("metadata_fill"), True)
         data["daily_signin"] = _as_bool(payload.get("daily_signin"), False)
         try:
             data["signin_window_start"], data["signin_window_end"] = normalize_signin_window(
@@ -389,6 +392,8 @@ def apply_settings(config: Config, settings: dict[str, Any]) -> None:
         config.move_target = Path(raw_target).expanduser() if raw_target else None
     if "check_missing" in settings:
         config.check_missing = bool(settings.get("check_missing"))
+    if "metadata_fill" in settings:
+        config.metadata_fill = bool(settings.get("metadata_fill"))
     if "daily_signin" in settings:
         config.daily_signin = bool(settings.get("daily_signin"))
     if "signin_window_start" in settings or "signin_window_end" in settings:
@@ -423,6 +428,7 @@ def bootstrap_settings(config: Config) -> dict[str, Any]:
     settings["post_sync_action"] = config.post_sync_action
     settings["move_target"] = str(config.move_target) if config.move_target else ""
     settings["check_missing"] = config.check_missing
+    settings["metadata_fill"] = config.metadata_fill
     settings["daily_signin"] = config.daily_signin
     settings["signin_window_start"] = config.signin_window_start
     settings["signin_window_end"] = config.signin_window_end
@@ -1283,6 +1289,7 @@ class WebApp:
             "post_sync_action": self.config.post_sync_action,
             "move_target": str(self.config.move_target) if self.config.move_target else "",
             "check_missing": self.config.check_missing,
+            "metadata_fill": self.config.metadata_fill,
             "daily_signin": self.config.daily_signin,
             "signin_window_start": self.config.signin_window_start,
             "signin_window_end": self.config.signin_window_end,

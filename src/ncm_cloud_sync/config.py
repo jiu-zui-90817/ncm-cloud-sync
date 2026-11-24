@@ -114,6 +114,7 @@ class Config:
     post_sync_action: str = "none"
     move_target: Path | None = None
     check_missing: bool = True
+    metadata_fill: bool = True
     daily_signin: bool = False
     signin_window_start: str = "08:00"
     signin_window_end: str = "23:00"
@@ -185,6 +186,7 @@ class Config:
             "post_sync_action": self.post_sync_action,
             "move_target": str(self.move_target) if self.move_target else None,
             "check_missing": self.check_missing,
+            "metadata_fill": self.metadata_fill,
             "daily_signin": self.daily_signin,
             "signin_window_start": self.signin_window_start,
             "signin_window_end": self.signin_window_end,
@@ -251,6 +253,8 @@ class Config:
             values["move_target"] = _resolve_path(raw["move_target"], base)
         if "check_missing" in raw:
             values["check_missing"] = parse_bool(raw["check_missing"], True)
+        if "metadata_fill" in raw:
+            values["metadata_fill"] = parse_bool(raw["metadata_fill"], True)
         if "daily_signin" in raw:
             values["daily_signin"] = parse_bool(raw["daily_signin"], False)
         for key in ("signin_window_start", "signin_window_end"):
@@ -381,6 +385,9 @@ class Config:
         check_missing = text("NCM_CLOUD_SYNC_CHECK_MISSING")
         if check_missing is not None:
             values["check_missing"] = parse_bool(check_missing, True)
+        metadata_fill = text("NCM_CLOUD_SYNC_METADATA_FILL")
+        if metadata_fill is not None:
+            values["metadata_fill"] = parse_bool(metadata_fill, True)
         daily_signin = text("NCM_CLOUD_SYNC_DAILY_SIGNIN")
         if daily_signin is not None:
             values["daily_signin"] = parse_bool(daily_signin, False)

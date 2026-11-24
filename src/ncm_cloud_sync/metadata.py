@@ -55,6 +55,37 @@ def read_tags(path: str | Path) -> dict[str, str]:
     return result
 
 
+LYRIC_SUFFIXES = (".lrc",)
+
+
+def find_lyric_sidecar(path: str | Path) -> Path | None:
+    """在同目录查找与音频同名的歌词文件（扩展名和文件名大小写不敏感）。"""
+    audio = Path(path)
+    stem = audio.stem.casefold()
+    if not stem:
+        return None
+    try:
+        candidates = [
+            child
+            for child in audio.parent.iterdir()
+            if child.is_file()
+            and child.suffix.lower() in LYRIC_SUFFIXES
+            and child.stem.casefold() == stem
+        ]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    # 优先完全同名的大小写，避免同一目录里出现多个仅大小写不同的歌词时随机选择。
+    candidates.sort(key=lambda item: (item.stem != audio.stem, item.name))
+    return candidates[0]
+
+
+def lyric_target(audio_target: Path, lyric: Path) -> Path:
+    """歌词跟随音频的最终文件名（包括同名冲突时的编号）。"""
+    return audio_target.with_name(audio_target.stem + lyric.suffix)
+
+
 def sanitize_filename(name: str, max_length: int = 120) -> str:
     """网易云对文件名比较敏感，去掉非法字符并压缩空白。"""
     text = unicodedata.normalize("NFC", name or "")

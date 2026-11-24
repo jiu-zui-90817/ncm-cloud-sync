@@ -179,3 +179,19 @@ def test_parse_bool() -> None:
     assert parse_bool("yes") is True
     assert parse_bool("off") is False
     assert parse_bool(None, True) is True
+
+
+def test_metadata_fill_defaults_and_overrides(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    loaded = Config.load(write_config(tmp_path, music), env={})
+    assert loaded.metadata_fill is True
+
+    disabled = Config.load(write_config(tmp_path, music, "metadata_fill: false\n"), env={})
+    assert disabled.metadata_fill is False
+
+    overridden = Config.load(
+        write_config(tmp_path, music, "metadata_fill: false\n"),
+        env={"NCM_CLOUD_SYNC_METADATA_FILL": "1"},
+    )
+    assert overridden.metadata_fill is True

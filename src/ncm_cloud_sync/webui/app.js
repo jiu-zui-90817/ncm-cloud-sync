@@ -453,6 +453,7 @@
     el("postSyncAction").value = action;
     el("moveTarget").value = settings.move_target || "";
     el("checkMissing").checked = settings.check_missing !== false;
+    el("metadataFill").checked = settings.metadata_fill !== false;
     el("dailySignin").checked = settings.daily_signin === true;
     el("signinWindowStart").value = settings.signin_window_start || "08:00";
     el("signinWindowEnd").value = settings.signin_window_end || "23:00";
@@ -1263,6 +1264,7 @@
     deleted: "已删除本地",
     moved_after_sync: "已移动本地",
     post_action_failed: "同步后处理失败",
+    metadata_filled: "元信息补全",
     deferred: "待续",
     to_upload: "待上传",
     cloud_only: "云端独有",
@@ -1614,6 +1616,7 @@
       post_sync_action: el("postSyncAction").value,
       move_target: el("moveTarget").value.trim(),
       check_missing: el("checkMissing").checked,
+      metadata_fill: el("metadataFill").checked,
       daily_signin: el("dailySignin").checked,
       signin_window_start: el("signinWindowStart").value || "08:00",
       signin_window_end: el("signinWindowEnd").value || "23:00",
