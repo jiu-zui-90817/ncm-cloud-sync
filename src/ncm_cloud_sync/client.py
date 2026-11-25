@@ -375,11 +375,11 @@ class CloudClient:
         songs = result.get("songs") if isinstance(result, dict) else None
         if not isinstance(songs, list):
             return []
-        parsed: list[dict[str, Any]] = []
-        for song in songs:
-            if not isinstance(song, dict):
-                continue
-            artists = song.get("ar") or song.get("artists") or []
+
+        def candidate(
+            payload: dict[str, Any], *, origin: bool
+        ) -> dict[str, Any] | None:
+            artists = payload.get("ar") or payload.get("artists") or []
             if isinstance(artists, dict):
                 artists = [artists]
             artist_names = [
@@ -387,19 +387,55 @@ class CloudClient:
                 for item in artists
                 if isinstance(item, dict) and str(item.get("name") or "").strip()
             ]
-            album = song.get("al") or song.get("album") or {}
-            album_name = str(album.get("name") or "").strip() if isinstance(album, dict) else ""
-            title = str(song.get("name") or "").strip()
-            if not title:
-                continue
-            parsed.append(
-                {
-                    "id": _as_int(song.get("id"), 0),
-                    "title": title,
-                    "artist": "/".join(artist_names),
-                    "album": album_name,
-                }
+            album = payload.get("al") or payload.get("album") or {}
+            album_name = (
+                str(album.get("name") or "").strip()
+                if isinstance(album, dict)
+                else ""
             )
+            title = str(payload.get("name") or "").strip()
+            if not title:
+                return None
+            return {
+                "id": _as_int(payload.get("id"), 0),
+                "title": title,
+                "artist": "/".join(artist_names),
+                "album": album_name,
+                "origin": origin,
+            }
+
+        parsed: list[dict[str, Any]] = []
+        seen: set[Any] = set()
+        for song in songs:
+            if not isinstance(song, dict):
+                continue
+            item = candidate(song, origin=False)
+            if item is not None:
+                key = item["id"] or (item["title"], item["artist"], item["album"])
+                if key not in seen:
+                    seen.add(key)
+                    parsed.append(item)
+            # 翻唱/演奏版搜索结果会带原曲信息；用它补全时优先使用原曲标签。
+            origin = song.get("originSongSimpleData")
+            if not isinstance(origin, dict):
+                continue
+            origin_id = _as_int(origin.get("songId"), 0)
+            origin_artists = origin.get("artists") or []
+            if isinstance(origin_artists, dict):
+                origin_artists = [origin_artists]
+            origin_album = origin.get("albumMeta") or {}
+            payload = {
+                "id": origin_id,
+                "name": origin.get("name"),
+                "ar": origin_artists,
+                "al": origin_album,
+            }
+            item = candidate(payload, origin=True)
+            if item is not None:
+                key = item["id"] or (item["title"], item["artist"], item["album"])
+                if key not in seen:
+                    seen.add(key)
+                    parsed.append(item)
         return parsed
 
     def _weapi(

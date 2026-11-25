@@ -65,7 +65,11 @@ class SyncStats:
     deleted: int = 0
     moved_after_sync: int = 0
     post_action_failed: int = 0
+    metadata_checked: int = 0
     metadata_filled: int = 0
+    metadata_skipped: int = 0
+    metadata_not_found: int = 0
+    metadata_failed: int = 0
     bytes_uploaded: int = 0
     capacity_total: int = 0
     capacity_used: int = 0
@@ -149,7 +153,14 @@ class SyncStats:
                 if self.post_action_failed
                 else ""
             )
-            + (f"，补全元信息 {self.metadata_filled} 首" if self.metadata_filled else "")
+            + (
+                f"，元信息检查 {self.metadata_checked} 首"
+                f"（补全 {self.metadata_filled}"
+                f"，未匹配 {self.metadata_not_found}"
+                f"，失败 {self.metadata_failed}）"
+                if self.metadata_checked
+                else ""
+            )
             + f"，上传 {self.bytes_uploaded / 1024 / 1024:.1f} MB，"
             f"耗时 {self.duration:.1f}s"
             + (
@@ -551,12 +562,26 @@ class Syncer:
         """上传前补全缺失标签；失败只影响补全，不阻断上传。"""
         if not self.config.metadata_fill:
             return audio
+        stats.metadata_checked += 1
         try:
             result = fill_metadata(audio.path, self.client)
         except Exception as exc:
+            stats.metadata_failed += 1
             logger.warning("补全元信息失败，继续上传: %s（%s）", audio.path, exc)
             return audio
         if not result.filled:
+            if result.status == "skipped":
+                stats.metadata_skipped += 1
+            elif result.status == "not_found":
+                stats.metadata_not_found += 1
+                logger.info("未补全元信息: %s（%s）", audio.path, result.message)
+            else:
+                stats.metadata_failed += 1
+                logger.warning(
+                    "补全元信息失败，继续上传: %s（%s）",
+                    audio.path,
+                    result.message,
+                )
             return audio
         changed = audio.path.stat()
         updated = AudioFile(audio.path, changed.st_size, changed.st_mtime_ns)

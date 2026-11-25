@@ -833,10 +833,30 @@ def test_upload_fills_missing_metadata_before_upload(tmp_path: Path) -> None:
         stats = Syncer(config, client, state).run_once()
 
     assert stats.uploaded == 1
+    assert stats.metadata_checked == 1
     assert stats.metadata_filled == 1
+    assert stats.metadata_not_found == 0
     assert client.search_queries == ["晴天 周杰伦"]
+    assert "元信息检查 1 首" in stats.summary()
     assert read_tags(path) == {
         "title": "晴天",
         "artist": "周杰伦",
         "album": "叶惠美",
     }
+
+
+def test_upload_continues_when_metadata_has_no_match(tmp_path: Path) -> None:
+    music = tmp_path / "music"
+    music.mkdir()
+    path = make_mp3(music / "未知歌曲.mp3")
+    config = make_config(tmp_path, music)
+    client = FakeClient(search=[])
+    with StateStore(config.db_path) as state:
+        stats = Syncer(config, client, state).run_once()
+
+    assert stats.uploaded == 1
+    assert stats.metadata_checked == 1
+    assert stats.metadata_filled == 0
+    assert stats.metadata_not_found == 1
+    assert client.search_queries == ["未知歌曲"]
+    assert read_tags(path) == {"title": "", "artist": "", "album": ""}

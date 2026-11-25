@@ -828,7 +828,13 @@ def test_search_songs_parses_cloudsearch_result() -> None:
     }
     assert calls[0][2] == {"check": False}
     assert songs == [
-        {"id": 186016, "title": "晴天", "artist": "周杰伦", "album": "叶惠美"}
+        {
+            "id": 186016,
+            "title": "晴天",
+            "artist": "周杰伦",
+            "album": "叶惠美",
+            "origin": False,
+        }
     ]
 
 
@@ -845,3 +851,48 @@ def test_search_songs_rejects_error_code_and_empty_query() -> None:
         client.search_songs("晴天")
     assert client.search_songs("   ") == []
     assert len(calls) == 1
+
+
+def test_search_songs_includes_original_song_metadata() -> None:
+    client = make_client()
+
+    def fake_weapi(path, payload=None, **kwargs):
+        return {
+            "code": 200,
+            "result": {
+                "songs": [
+                    {
+                        "id": 2668397359,
+                        "name": "晴天 (原唱 周杰伦)",
+                        "ar": [{"name": "RyaVocal"}],
+                        "al": {"name": "晴天"},
+                        "originSongSimpleData": {
+                            "songId": 186016,
+                            "name": "晴天",
+                            "artists": [{"name": "周杰伦"}],
+                            "albumMeta": {"name": "叶惠美"},
+                        },
+                    }
+                ]
+            },
+        }
+
+    client._weapi = fake_weapi  # type: ignore[method-assign]
+    songs = client.search_songs("晴天 周杰伦")
+
+    assert songs == [
+        {
+            "id": 2668397359,
+            "title": "晴天 (原唱 周杰伦)",
+            "artist": "RyaVocal",
+            "album": "晴天",
+            "origin": False,
+        },
+        {
+            "id": 186016,
+            "title": "晴天",
+            "artist": "周杰伦",
+            "album": "叶惠美",
+            "origin": True,
+        },
+    ]

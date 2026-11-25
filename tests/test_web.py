@@ -1017,6 +1017,7 @@ def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
     assert 'id="signinWindowStart"' in html
     assert 'id="signinWindowEnd"' in html
     assert 'id="metadataFill"' in html
+    assert "只检查本次准备上传且缺标签的文件" in html
     assert 'id="signinNow"' not in html
 
     status, _, script = call(app, "/app.js")
@@ -1024,6 +1025,8 @@ def test_static_assets_put_signin_in_header(tmp_path: Path) -> None:
     assert 'el("dailySignin").checked = settings.daily_signin === true;' in script
     assert 'el("metadataFill").checked = settings.metadata_fill !== false;' in script
     assert 'metadata_fill: el("metadataFill").checked,' in script
+    assert "data.metadata_checked" in script
+    assert "元信息 " in script
     assert 'el("signinWindowStart").value = settings.signin_window_start || "08:00";' in script
     assert 'signin_window_start: el("signinWindowStart").value || "08:00",' in script
     assert "function signinDetailText(details)" in script

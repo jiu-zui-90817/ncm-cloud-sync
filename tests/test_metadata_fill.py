@@ -53,6 +53,18 @@ def test_fill_metadata_keeps_existing_and_rejects_artist_mismatch(tmp_path: Path
     assert read_tags(path) == {"title": "", "artist": "", "album": ""}
 
 
+def test_fill_metadata_handles_reversed_title_artist_filename(tmp_path: Path) -> None:
+    path = make_mp3(tmp_path / "晴天 - 周杰伦.mp3")
+    client = FakeClient(
+        [{"id": 186016, "title": "晴天", "artist": "周杰伦", "album": "叶惠美"}]
+    )
+    result = fill_metadata(path, client)
+
+    assert result.status == "filled"
+    assert result.fields == {"title": "晴天", "artist": "周杰伦", "album": "叶惠美"}
+    assert client.queries == ["周杰伦 晴天", "晴天 周杰伦"]
+
+
 def test_clean_name_removes_track_and_quality_tags() -> None:
     assert _clean_name("01. 周杰伦 - 晴天 [320k]") == ("周杰伦", "晴天")
     assert _clean_name("Artist_Name_-_Title") == ("Artist Name", "Title")

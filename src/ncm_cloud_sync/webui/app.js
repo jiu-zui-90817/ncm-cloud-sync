@@ -185,8 +185,8 @@
       var stats = document.createElement("div");
       stats.className = "run-stats";
       var statTexts;
+      var data = run.stats || {};
       if (run.mode === "scan") {
-        var data = run.stats || {};
         statTexts = [
           "扫描 " + (run.scanned || 0),
           "待上传 " + (data.to_upload || 0),
@@ -202,6 +202,11 @@
           "跳过 " + (run.skipped || 0),
           "失败 " + (run.failed || 0)
         ];
+        if (data.metadata_checked) {
+          statTexts.push(
+            "元信息 " + (data.metadata_filled || 0) + "/" + data.metadata_checked
+          );
+        }
       }
       statTexts.forEach(function (text) {
         var span = document.createElement("span");
@@ -494,6 +499,9 @@
       }
       if (stats.cloud_songs) {
         text += " · 云盘 " + stats.cloud_songs + " 首";
+      }
+      if (stats.metadata_checked) {
+        text += " · 元信息 " + (stats.metadata_filled || 0) + "/" + stats.metadata_checked;
       }
       var filtered = stats.filtered || ((stats.scan_unsupported || 0) +
         (stats.scan_excluded || 0) + (stats.scan_unreadable || 0));
@@ -1318,7 +1326,10 @@
       " · 扫描 " + (stats.scanned || 0) +
       " · 上传 " + (stats.uploaded || 0) +
       " · 跳过 " + (stats.skipped || 0) +
-      " · 失败 " + (stats.failed || 0);
+      " · 失败 " + (stats.failed || 0) +
+      (stats.metadata_checked
+        ? " · 元信息 " + (stats.metadata_filled || 0) + "/" + stats.metadata_checked
+        : "");
   }
 
   function loadRunDetail(reset) {

@@ -16,6 +16,7 @@ _FIELDS = ("title", "artist", "album")
 _LEADING_TRACK_RE = re.compile(r"^\s*\d{1,3}[\s._-]+")
 _TAG_RE = re.compile(r"[\[\(（【][^\]\)）】]{1,24}[\]\)）】]")
 _CLEAN_RE = re.compile(r"[\s._-]+")
+_SEARCH_LIMIT = 20
 
 
 @dataclass
@@ -34,18 +35,29 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", str(text or "").casefold())
 
 
-def _clean_name(stem: str) -> tuple[str, str]:
-    """从文件名猜测 (artist, title)，尽量去掉音轨号和音质标签。"""
+def _name_candidates(stem: str) -> list[tuple[str, str]]:
+    """从文件名猜测 (artist, title)，同时兼容“歌手 - 歌名”和“歌名 - 歌手”。"""
     text = _TAG_RE.sub(" ", stem)
     text = _LEADING_TRACK_RE.sub("", text)
     text = text.replace("_", " ").strip()
-    if " - " in text:
-        left, right = text.split(" - ", 1)
-        left = _CLEAN_RE.sub(" ", left).strip()
-        right = _CLEAN_RE.sub(" ", right).strip()
+    parts = re.split(r"\s+-\s+", text, maxsplit=1)
+    if len(parts) == 2:
+        left = _CLEAN_RE.sub(" ", parts[0]).strip()
+        right = _CLEAN_RE.sub(" ", parts[1]).strip()
         if left and right:
-            return left, right
-    return "", _CLEAN_RE.sub(" ", text).strip()
+            candidates = [(left, right)]
+            swapped = (right, left)
+            if swapped != candidates[0]:
+                candidates.append(swapped)
+            return candidates
+    cleaned = _CLEAN_RE.sub(" ", text).strip()
+    return [("", cleaned)] if cleaned else []
+
+
+def _clean_name(stem: str) -> tuple[str, str]:
+    """向后兼容：返回第一种文件名解释。"""
+    candidates = _name_candidates(stem)
+    return candidates[0] if candidates else ("", "")
 
 
 def _candidate_score(
@@ -103,16 +115,30 @@ def fill_metadata(
     if not missing:
         return FillResult("skipped", message="标签已完整")
 
-    guessed_artist, guessed_title = _clean_name(file_path.stem)
-    query_title = title or guessed_title
-    query_artist = artist or guessed_artist
-    if not query_title:
-        return FillResult("not_found", message="无法从文件名解析歌曲名")
-    query = f"{query_title} {query_artist}".strip()
-    candidates = client.search_songs(query, limit=10)
-    match = _pick(candidates, query_title, query_artist)
+    candidates = _name_candidates(file_path.stem)
+    if not candidates:
+        candidates = [("", "")]
+    match: dict[str, Any] | None = None
+    seen_queries: set[str] = set()
+    last_query = ""
+    for guessed_artist, guessed_title in candidates:
+        query_title = title or guessed_title
+        query_artist = artist or guessed_artist
+        if not query_title:
+            continue
+        query = f"{query_title} {query_artist}".strip()
+        if query in seen_queries:
+            continue
+        seen_queries.add(query)
+        last_query = query
+        songs = client.search_songs(query, limit=_SEARCH_LIMIT)
+        match = _pick(songs, query_title, query_artist)
+        if match is not None:
+            break
     if match is None:
-        return FillResult("not_found", message=f"没有找到可靠匹配：{query}")
+        if not seen_queries:
+            return FillResult("not_found", message="无法从文件名解析歌曲名")
+        return FillResult("not_found", message=f"没有找到可靠匹配：{last_query}")
 
     updates: dict[str, str] = {}
     for name in missing:
